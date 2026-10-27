@@ -88,7 +88,8 @@ h1,h2,h3{font-family:var(--f-display);font-weight:800;text-transform:uppercase;l
 .cash{font:800 clamp(30px,9vw,40px)/1 var(--f-display);letter-spacing:.02em;font-variant-numeric:tabular-nums}
 .mk-sub{display:flex;flex-wrap:wrap;gap:4px 14px;font:500 12.5px/1.3 var(--f-mono)}
 .note{color:var(--bad)} .note.ok{color:var(--good)}
-.news{border-left:3px solid var(--amber);padding:4px 0 4px 10px;font-size:13px}
+.news{border-left:3px solid var(--amber);padding:4px 0 4px 10px;font-size:13px}.news.dn{border-color:var(--ice)}
+.heads{list-style:none;margin:0;padding:0;display:grid;gap:8px}.heads li{display:grid;grid-template-columns:18px 1fr;gap:8px;font-size:14px}.heads li>b{font-family:var(--f-mono)}.heads li.up>b{color:var(--good)}.heads li.dn>b{color:var(--ice)}.heads li.rumor{color:var(--muted)}
 .goods{list-style:none;margin:0;padding:0}
 .good{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer;width:100%;text-align:left;background:none;border-left:0;border-right:0;border-top:0;appearance:none}
 .good:hover{background:var(--panel)}
@@ -310,9 +311,9 @@ const dv = (a, b) => isInterstellar(a, b) ? 0 : DV[a][b];
 /* ---------- simple economy (v20) ---------- */
 // Prices follow one rule: each good has a base price ($/kg). Stops that make it sell cheap, stops that want it pay more.
 const BASE = { water: 700, metal: 1400, nitro: 3000, food: 5000, elec: 30000, leu: 25000, pgm: 60000, he3: 15e6, samp: 8e6 };
-const PBAND = { make: [0.88, 0.98], n: [0.98, 1.08], want: [1.08, 1.20] };
-const STOCK_MULT = { water: 1, metal: 1, nitro: 1, food: 1, elec: 1, leu: 1, pgm: 1 };
-const STAR_X = 1.25, CONTRACT_PER_T = 6000, ROUTE_K = 1e6;   // tuning (DEC-035, DEC-036)
+const PBAND = { make: [0.75, 0.90], n: [0.95, 1.10], want: [1.22, 1.42] };
+const STOCK_MULT = { water: 0.3, metal: 0.3, nitro: 0.3, food: 0.3, elec: 0.3, leu: 0.3, pgm: 0.3 };
+const STAR_X = 1.4, CONTRACT_PER_T = 6000, ROUTE_K = 1e6;   // tuning (DEC-035, DEC-036)
 const pMid = r => (PBAND[r][0] + PBAND[r][1]) / 2;
 const starX = (st, role) => st.sys === 'star' && role !== 'make' ? STAR_X : 1;   // star colonies pay more for what they import
 const refPrice = (gid, sid) => { const st = ST(sid), r = roleOf(st, gid); return BASE[gid] * pMid(r) * starX(st, r); };   // $/kg, mid-band
@@ -331,6 +332,60 @@ const roleOf = (st, g) => st.make.includes(g) ? 'make' : st.want.includes(g) ? '
 function fx() { return 1; }   // v20: all prices in dollars
 const spreadAt = id => ST(id).sys === 'star' ? SPREAD_STAR : SPREAD_SOL;
 
+/* ---------- market event trees (v22) ---------- */
+// Each mission gets a seeded tree of market events sized to its length (one arc per ~6 days).
+// Arc: rumor (0-3 days ahead) -> event at one stop (2-4 days) -> branch: worsens, spreads, rebounds or fades.
+// up = price spike (the stop is short: sell there); down = crash (a glut: buy there).
+const EV_T = [
+  { up: 1, g: 'food',  at: ['mars', 'leo', 'gw', 'ceres'],  head: 'Hydroponics blight at {st}', rumor: 'Crop sensors at {st} report a fungus in the grow racks' },
+  { up: 1, g: 'water', at: ['art', 'psy', 'leo', 'mars'],   head: 'Ice mine collapse cuts water to {st}', rumor: 'Seismic alarms near the {st} ice supply' },
+  { up: 1, g: 'elec',  at: ['art', 'ilrs', 'mars', 'ceres', 'prox'], head: 'Fab fire at {st}: spares needed now', rumor: 'The {st} quartermaster is asking around for electronics' },
+  { up: 1, g: 'leu',   at: ['art', 'mars', 'ceres', 'prox', 'tau'], head: 'Reactor scram at {st}: fuel rods wanted', rumor: 'The {st} reactor is running hot' },
+  { up: 1, g: 'he3',   at: ['leo', 'prox', 'barn', 'tau'],  head: 'New fusion plant at {st} bids for helium-3', rumor: 'The {st} fusion plant passed its final test' },
+  { up: 1, g: 'metal', at: ['gw', 'leo', 'ceres', 'mars'],  head: 'Construction boom at {st}: metal wanted', rumor: 'The {st} council approved a new habitat ring' },
+  { up: 1, g: 'nitro', at: ['ilrs', 'art', 'psy', 'gw'],    head: 'Ammonia leak at {st}: nitrogen wanted', rumor: 'Pressure is dropping in the {st} life-support loop' },
+  { up: 1, g: 'pgm',   at: ['leo', 'mars', 'gw'],           head: 'Catalyst shortage at {st}: platinum bids soar', rumor: '{st} refineries are short of catalyst' },
+  { up: 1, g: 'samp',  at: ['leo', 'gw'],                   head: 'Museum bidding war for exoplanet samples at {st}', rumor: 'Collectors are gathering at {st}' },
+  { up: 0, g: 'water', at: ['ceres', 'art', 'gw'],          head: 'Ice glut at {st}: water dumped', rumor: '{st} haulers report a record ice harvest' },
+  { up: 0, g: 'metal', at: ['psy', 'ilrs', 'ceres'],        head: 'New smelter floods {st} with metal', rumor: 'The {st} smelter is about to come online' },
+  { up: 0, g: 'pgm',   at: ['psy', 'barn', 'leo'],          head: 'Platinum vein strike: {st} prices crash', rumor: 'Assay crews at {st} have gone very quiet' },
+  { up: 0, g: 'food',  at: ['leo', 'mars', 'gw', 'prox'],   head: 'Bumper harvest at {st}: food cheap', rumor: '{st} greenhouses are ahead of schedule' },
+  { up: 0, g: 'elec',  at: ['leo', 'gw', 'ilrs'],           head: 'Spares surplus at {st}: electronics dumped', rumor: '{st} auditors found unlisted crates' },
+  { up: 0, g: 'he3',   at: ['ilrs', 'gw', 'leo'],           head: 'Helium-3 glut at {st}', rumor: 'The {st} regolith plant is running double shifts' },
+  { up: 0, g: 'samp',  at: ['prox', 'barn', 'tau'],         head: 'Survey haul floods {st} with samples', rumor: 'The {st} survey team is coming home early' },
+  { up: 0, g: null,    at: null,                            head: 'KESTREL fire sale at {st}: {g} dumped', rumor: 'KESTREL was spotted docking at {st}' }
+];
+const EV_CACHE = {};
+const evDist = (a, b) => isInterstellar(a, b) ? ly(a, b) * 10 : dv(a, b);
+function eventTree(seed, total) {
+  const key = seed + '|' + total; if (EV_CACHE[key]) return EV_CACHE[key];
+  const r = rngFor(seed, 'evtree|' + total), n = Math.max(3, Math.round(total / 6)), lo = 3, span = (total - 2 - lo) / n, out = [];
+  const used = [], sol = STATIONS.filter(s => s.sys === 'sol').map(s => s.id), bulk = ['water', 'metal', 'nitro', 'food', 'elec', 'leu'];
+  for (let i = 0; i < n; i++) {
+    let t, stop, tries = 0;   // no template twice per mission (until all are used), no stop twice in a row
+    do { t = EV_T[Math.floor(r() * EV_T.length)]; stop = t.at ? t.at[Math.floor(r() * t.at.length)] : sol[Math.floor(r() * sol.length)]; tries++; }
+    while (tries < 12 && ((used.includes(t) && used.length < EV_T.length) || (out.length && out.filter(e => e.stage === 'event').slice(-1).some(e => e.stop === stop))));
+    used.push(t);
+    const g = t.g || bulk[Math.floor(r() * bulk.length)];
+    const from = Math.round(lo + span * i + r() * span * 0.6), dur = 2 + Math.floor(r() * 3), to = from + dur - 1;
+    const m = t.up ? 2 + r() * 1.5 : 0.25 + r() * 0.25;
+    const lead = r() < 0.75 ? 1 + Math.floor(r() * 3) : 0, id = 'A' + (i + 1);
+    const fill = (s, at) => s.replace('{st}', short(ST(at || stop).name)).replace('{near}', short(ST(at || stop).name)).replace('{g}', G(g).name.toLowerCase());
+    out.push({ id, stop, g, from, to, m, up: !!t.up, head: fill(t.head), rumor: lead ? fill(t.rumor) : null, rumorDay: from - lead, stage: 'event' });
+    const b = r();
+    if (b < 0.35) out.push({ id: id + 'x', stop, g, from: to + 1, to: to + 2, m: t.up ? m * 1.25 : m * 0.75, up: !!t.up, stage: 'worsens',
+      head: fill(t.up ? '{st} shortage worsens: {g} prices climb again' : '{st} {g} glut deepens') });
+    else if (b < 0.6) { const near = STATIONS.filter(s => s.id !== stop && s.sys === ST(stop).sys).sort((a, c) => evDist(stop, a.id) - evDist(stop, c.id))[0].id;
+      out.push({ id: id + 's', stop: near, g, from: to, to: to + 2, m: t.up ? 1 + (m - 1) * 0.6 : 1 - (1 - m) * 0.6, up: !!t.up, stage: 'spreads',
+        head: t.up ? `${G(g).name} shortage spreads to ${short(ST(near).name)}` : `Cheap ${G(g).name.toLowerCase()} from ${short(ST(stop).name)} floods ${short(ST(near).name)}` }); }
+    else if (b < 0.85) out.push({ id: id + 'r', stop, g, from: to + 1, to: to + 2, m: t.up ? 0.55 : 1.8, up: !t.up, stage: 'rebounds',
+      head: fill(t.up ? 'Relief convoys overshoot: {g} glut at {st}' : 'Buyers rush back: {g} short at {st} after the crash') });
+  }
+  return EV_CACHE[key] = out.filter(e => e.from <= total);
+}
+const evTotal = seed => S && S.seed === seed ? S.total : 45;
+const eventsAt = (seed, day, stop, g, total) => eventTree(seed, total || evTotal(seed)).filter(e => e.stop === stop && e.g === g && day >= e.from && day <= e.to);
+
 // Market at a station on a day: dollar price per lot and stock (lots; Infinity for unlimited sale side).
 // Price position within a good's band at a stop: a smooth trend through random knots every PX_KNOT days,
 // plus small daily noise. Tomorrow's price is close to today's; over a week it can move across the band.
@@ -340,17 +395,21 @@ function pxPos(seed, id, gid, day, j) {
   const a = rngFor(seed, 'px|' + id + '|' + gid + '|' + k)(), b = rngFor(seed, 'px|' + id + '|' + gid + '|' + (k + 1))();
   return Math.min(1, Math.max(0, a + (b - a) * s + (j - 0.5) * PX_NOISE));
 }
-function market(seed, day, id) {
+function market(seed, day, id, total) {
   const st = ST(id), r = rngFor(seed, 'm|' + day + '|' + id), out = {};
   for (const g of GOODS) {
     const role = roleOf(st, g.id), j = r(), c = (r(), r());
-    const sellsHere = !!(st.sells && st.sells.includes(g.id));
-    // Which goods a stop trades is fixed for the whole mission
-    if (role === 'n' && !sellsHere && rngFor(seed, 'av|' + id + '|' + g.id)() < 0.3) { out[g.id] = null; continue; }
+    const sellsHere = !!(st.sells && st.sells.includes(g.id));   // v22: every stop buys and sells every good
     const x = pxPos(seed, id, g.id, day, j);
     const band = PBAND[role], usdPerKg = BASE[g.id] * (band[0] + (band[1] - band[0]) * x) * starX(st, role);
-    const sm = STOCK_MULT[g.id] || 1, stock = role === 'make' || sellsHere ? Math.round((g.cap[0] + (g.cap[1] - g.cap[0]) * c) * sm) : role === 'n' ? Math.round((g.cap[0] * 0.4 + g.cap[0] * 0.6 * c) * sm) : 0;
-    out[g.id] = { local: usdPerKg * g.kg, stock, role, sells: stock > 0, pos: x };
+    const sm = STOCK_MULT[g.id] || 1;
+    let stock = Math.max(1, role === 'make' || sellsHere ? Math.round((g.cap[0] + (g.cap[1] - g.cap[0]) * c) * sm) : role === 'n' ? Math.round((g.cap[0] * 0.4 + g.cap[0] * 0.6 * c) * sm) : Math.round((g.cap[0] * 0.2 + g.cap[0] * 0.2 * c) * sm));
+    const evs = eventsAt(seed, day, id, g.id, total);
+    let price = usdPerKg * g.kg, ev = null;
+    if (evs.length) { const mult = evs.reduce((a, e) => a * e.m, 1), last = evs[evs.length - 1]; price *= mult;
+      stock = mult > 1 ? Math.max(1, Math.round(stock * 0.35)) : Math.round(stock * 2.5 + g.cap[0] * sm);
+      ev = { up: mult > 1, m: mult, head: last.head, to: Math.max(...evs.map(e => e.to)) }; }
+    out[g.id] = { local: price, stock, role, sells: stock > 0, pos: x, ev };
   }
   return out;
 }
@@ -415,7 +474,7 @@ function migrate20(s){if(!s||s.econ>=20)return s;
   const old={EUR:1/1.1193,CNY:6.686};for(const c of Object.keys(s.loans||{}))if(s.loans[c]&&old[c])s.loans[c].bal/=old[c];
   s.fxAdj={};if(s.contract&&s.contract.good==='prop')s.contract=null;if(s.news&&s.news.good==='prop')s.news=null;
   if(s.mkt)s.mkt={day:s.mkt.day,loc:s.mkt.loc,data:market(s.seed,s.mkt.day,s.mkt.loc)};
-  s.econ=20;return s;}
+  s.econ=20;s.seenEv=s.seenEv||[];return s;}
 function loadSaved(){try{const s=JSON.parse(localStorage.getItem(KEY)||'null');return s&&s.v===3?migrate20(norm(s)):null;}catch(e){return null;}}
 const kstDate=()=>new Date(Date.now()+9*3600e3).toISOString().slice(0,10);
 const dailyNo=()=>Math.floor((Date.parse(kstDate())-Date.parse('2026-10-24'))/864e5)+1;
@@ -465,6 +524,17 @@ function showActIfAny(){if(!S||!S.actQueue||!S.actQueue.length||sheetSpec||S.eve
   const id=S.actQueue.shift(),a=ACTS.find(x=>x.id===id);if(!a)return;try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}
   openSheet({eyebrow:`Act complete · ${S.acts.length} of ${ACTS.length}`,title:a.name,body:`<p>${a.text}</p>`,actions:[{label:'Continue',fn:()=>{closeSheet();render();}}]});}
 
+/* ---------- headlines (v22) ---------- */
+// What the probe knows today: events under way (star news arrives light-lag late) and rumors of what's coming.
+function headlines(){if(!S)return [];const out=[];
+  for(const e of eventTree(S.seed,S.total)){const lag=lagDays(S.loc,e.stop),seen=S.day-lag;
+    if(seen>=e.from&&seen<=e.to)out.push({key:e.id,type:'now',e,lag,text:e.head,left:e.to-seen});
+    else if(e.rumor&&seen>=e.rumorDay&&seen<e.from)out.push({key:e.id+'?',type:'rumor',e,lag,text:'Rumor: '+e.rumor});}
+  return out.sort((a,b)=>(a.type==='now'?0:1)-(b.type==='now'?0:1));}
+const evTag=id=>{const h=headlines().find(x=>x.type==='now'&&x.e.stop===id);return h?`<span class="${h.e.up?'up':'dn'}">${h.e.up?'▲':'▼'} ${G(h.e.g).name.split(' ')[0].toLowerCase()}</span>`:'';};
+function newsHTML(list){return list.length?`<ul class="heads">${list.map(h=>`<li class="${h.type==='rumor'?'rumor':h.e.up?'up':'dn'}"><b>${h.type==='rumor'?'?':h.e.up?'▲':'▼'}</b><span>${h.text}${h.type==='now'?`<span class="sub">${G(h.e.g).name} ×${h.e.m.toFixed(h.e.m<1?2:1)} at ${short(ST(h.e.stop).name)} · ${h.left>0?`${h.left+1} days left`:'last day'}${h.lag?` · report ${h.lag}d old`:''}</span>`:`<span class="sub">${short(ST(h.e.stop).name)}${h.lag?` · report ${h.lag}d old`:''} · not confirmed</span>`}</span></li>`).join('')}</ul>`:'<p class="empty">No headlines today.</p>';}
+function logNews(){S.seenEv=S.seenEv||[];for(const h of headlines()){if(S.seenEv.includes(h.key))continue;S.seenEv.push(h.key);log(h.type==='now'?`News: ${h.text}.`:`News: ${h.text}.`,h.type==='now'?(h.e.up?'good':''):'');}}
+
 /* ---------- run lifecycle ---------- */
 function newRun(mode,days){
   const seed=mode==='daily'?'daily-'+kstDate():'run-'+Math.random().toString(36).slice(2,10);
@@ -475,11 +545,11 @@ function newRun(mode,days){
   arrive(true);save();go('market');showIntro();
 }
 function arrive(first){
-  S.mkt={day:S.day,loc:S.loc,data:market(S.seed,S.day,S.loc)};S.news=null;
+  S.mkt={day:S.day,loc:S.loc,data:market(S.seed,S.day,S.loc)};S.news=null;logNews();
   const r=rngFor(S.seed,'e|'+S.day+'|'+S.loc);
   const a=r(),b=r(),c=r(),d=r(),e=r(),f=r();
   if(first)return;
-  if(a<.18){const avail=GOODS.filter(g=>S.mkt.data[g.id]);const g=avail[Math.floor(b*avail.length)];const spike=c<.5;const m=spike?1.6+d*.8:.35+d*.25;
+  if(a<.1){const avail=GOODS.filter(g=>S.mkt.data[g.id]&&!S.mkt.data[g.id].ev);const g=avail[Math.floor(b*avail.length)];const spike=c<.5;const m=spike?1.6+d*.8:.35+d*.25;
     S.mkt.data[g.id].local*=m;S.news={good:g.id,spike};log(spike?`${ST(S.loc).name} is short on ${g.name.toLowerCase()}. Local price up ${Math.round(Math.abs(m-1)*100)}%.`:`KESTREL dumped ${g.name.toLowerCase()} at ${ST(S.loc).name}. Local price down ${Math.round(Math.abs(m-1)*100)}%.`);}
   const h=r(),st=ST(S.loc);let acc=0;
   if(S.loc==='leo'&&h<(acc+=.12))return evDebris(r);
@@ -799,19 +869,19 @@ function renderMarket(){
       <div class="mk-top"><button class="back menubtn" type="button" id="m-home" aria-label="Menu">☰</button><div style="flex:1;min-width:0"><span class="eyebrow">${st.place}</span><h2>${st.name}</h2></div><div class="mk-day"><b>${Math.min(S.day,S.total)}/${S.total}</b><span class="eyebrow">Days</span></div></div>
       <div class="cash">${usd(S.cash)}</div>
       <div class="mk-sub"><span class="rep">${repTier(S.loc)} ${Math.round(repOf(S.loc))}</span><span class="note ${S.debt>0?'':'ok'}">DEBT ${S.debt>0?usd(S.debt):'CLEARED'}</span>${loansUSD()>0?`<span class="note">LOANS ${usd(loansUSD())}</span>`:''}${savUSD()>0?`<span class="note ok">SAVED ${usd(savUSD())}</span>`:''}<span class="muted">${AGENCY_SHORT[st.bloc]} · ${BLOC_NAME[st.bloc].toLowerCase()}</span></div>
-      ${S.news?`<p class="news">${S.news.spike?'Colony shortage':'Rival dump'}: ${G(S.news.good).name} ${S.news.spike?'well above':'well below'} its usual range.</p>`:''}
+      ${GOODS.filter(g=>m[g.id]&&m[g.id].ev).map(g=>{const v=m[g.id].ev;return `<p class="news ${v.up?'':'dn'}">${v.up?'▲':'▼'} ${v.head}. Price ×${v.m.toFixed(v.m<1?2:1)}${v.to>S.day?`, ${v.to-S.day+1} days left`:', last day'}: ${v.up?'sell here':'buy here'}.</p>`;}).join('')}${S.news?`<p class="news">${S.news.spike?'Colony shortage':'Rival dump'}: ${G(S.news.good).name} ${S.news.spike?'well above':'well below'} its usual range.</p>`:''}
     </header>
     <div class="body pad" style="padding-block:0 8px">
       <ul class="goods">${GOODS.map(g=>{const o=m[g.id],h=held(g.id);
         if(!o)return `<li><button class="good na" type="button" disabled><span class="qty ${h?'':'none'}">${h?qfmt(h):''}</span><span class="nm"><b>${g.name}</b><small>not traded here</small></span><span class="px"><b>—</b></span></button></li>`;
-        return `<li><button class="good ${o.role}" type="button" data-g="${g.id}"><span class="qty ${h?'':'none'}">${h?qfmt(h):''}</span><span class="nm"><b>${g.name}</b><small>${LOT[g.unit]}${o.role==='make'?' · made here':o.role==='want'?' · in demand':''}${o.stock?'':o.sells?' · sold out today':' · buys only'}</small></span><span class="px"><b>${usd(o.local)}</b></span></button></li>`;}).join('')}</ul>
+        return `<li><button class="good ${o.role}" type="button" data-g="${g.id}"><span class="qty ${h?'':'none'}">${h?qfmt(h):''}</span><span class="nm"><b>${g.name}</b><small>${o.ev?(o.ev.up?'<span class="up">▲ shortage</span> · ':'<span class="dn">▼ glut</span> · '):''}${LOT[g.unit]}${o.role==='make'?' · made here':o.role==='want'?' · in demand':''}${o.stock?'':' · sold out today'}</small></span><span class="px"><b>${usd(o.local)}</b></span></button></li>`;}).join('')}</ul>
     </div>
     <footer class="foot pad">
       <div class="meters"><div class="meter ${fuelPct>95?'low':''}"><div class="lbl"><span>Hold ${massT().toFixed(0)}/${S.hold} t</span></div><div class="track"><i style="width:${fuelPct}%"></i></div></div>
         <div class="meter hull ${S.hull<35?'low':''}"><div class="lbl"><span></span><span>Hull ${S.hull}</span></div><div class="track"><i style="width:${S.hull}%"></i></div></div></div>
       <div class="fuelline"><span>Free hold ${tons(Math.max(0,freeT()))}</span><span title="Cash + savings − debt − loans">Fund ${usd(net())}</span></div>
       <div class="navrow">
-        <button class="navbtn" type="button" data-p="trades">Trades<small>best picks</small></button>
+        <button class="navbtn" type="button" data-p="trades">Trades<small>${(()=>{const n=headlines().filter(h=>h.type==='now').length;return n?n+' headline'+(n>1?'s':''):'best picks';})()}</small></button>
         <button class="navbtn" type="button" data-p="freight">Freight<small>${S.charter?'1 active':ch?ch+' contracts':'contracts'}</small>${deliver||(ch&&S.cash<5e6)?'<span class="dot"></span>':''}</button>
         <button class="navbtn" type="button" data-p="port">Port<small>${svcList(st).length?svcList(st).map(x=>SVC[x].split(' ')[0].toLowerCase()).join(' · '):st.sys==='sol'&&S.debt>0?'repay debt':'probe'}</small></button>
         <button class="navbtn" type="button" data-p="log">Log<small>acts ${S.acts.length}/${ACTS.length}</small></button>
@@ -830,7 +900,7 @@ function pageShell(title,body,foot){
 function renderPage(){
   const p=ui.page;
   if(p==='trades'){const rows=bestTrades();
-    pageShell('Best trades',`<p class="muted small"><b>Profit</b>: what the cargo earns after spreads, using your cash and hold. <b>Per day</b>: profit per day of travel; the list is sorted by it, because days cost interest. Destination prices are today's and move a little by arrival; star prices are reports, days old. Interest not included.</p>
+    pageShell('Best trades',`<div class="card"><span class="eyebrow">Headlines · day ${S.day}</span>${newsHTML(headlines())}<p class="small muted" style="margin-top:8px">▲ shortage: the stop pays far more, sell there. ▼ glut: the stop sells cheap, buy there. Events last 2–4 days and can worsen, spread to a nearby stop or swing the other way.</p></div><p class="muted small"><b>Profit</b>: what the cargo earns after spreads, using your cash and hold. <b>Per day</b>: profit per day of travel; the list is sorted by it, because days cost interest. Destination prices are today's and move a little by arrival; star prices are reports, days old. Interest not included.</p>
       ${rows.length?`<table><thead><tr><th>Buy here, sell at</th><th class="n">Qty</th><th class="n">Profit</th><th class="n">Per day</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="pick" data-i="${i}" tabindex="0"><td><b>${G(r.g).name}</b><span class="sub">→ ${ST(r.d).name} · ${r.days}d${r.lag?` · report ${r.lag}d old`:''}</span></td><td class="n">${amt(r.q,G(r.g))}</td><td class="n up">${usd(r.net)}</td><td class="n ${r.rank>0?'':'warn'}">${r.rank<0?'−':''}${usd(Math.abs(r.rank))}</td></tr>`).join('')}</tbody></table><p class="small muted">Tap a row to load the trade and set the destination.</p>`:'<p class="empty">No profitable trade from here with your cash and hold. Check Freight for a supply contract.</p>'}`);
     document.querySelectorAll('tr.pick').forEach(tr=>{const goTo=()=>{const r=rows[+tr.dataset.i];sel=r.d;selGood=r.g;suggestQ=r.q;go('market');openTrade();};tr.addEventListener('click',goTo);tr.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();goTo();}});});
   }
@@ -884,10 +954,10 @@ function openTrade(){
     const sellMax=Math.floor(h+1e-9),mx=Math.max(maxBuy,sellMax);
     const q0=suggestQ!==null?Math.min(suggestQ,mx):(mx?Math.min(mx,1):0);suggestQ=null;
     const band=PBAND[o.role],sx=starX(st,o.role),lo=BASE[g.id]*band[0]*sx*g.kg,hi=BASE[g.id]*band[1]*sx*g.kg;
-    const today=S.news&&S.news.good===selGood?(S.news.spike?'shortage':'dumped'):o.pos==null?'':o.pos<.34?'low':o.pos>.66?'high':'mid';
-    const why=o.role==='make'?'Made here, so it sells cheap.':o.role==='want'?`In demand here, so it pays well${sx>1?', and star colonies pay extra for imports':''}.`:'Neither made nor wanted here: middle prices.';
+    const today=o.ev?(o.ev.up?`shortage ×${o.ev.m.toFixed(1)}`:`glut ×${o.ev.m.toFixed(2)}`):S.news&&S.news.good===selGood?(S.news.spike?'shortage':'dumped'):o.pos==null?'':o.pos<.34?'low':o.pos>.66?'high':'mid';
+    const why=o.ev?`${o.ev.head}. ${o.ev.up?'Prices are far above normal: a good place to sell.':'Prices are far below normal: a good place to buy.'}`:o.role==='make'?'Made here, so it sells cheap.':o.role==='want'?`In demand here, so it pays well${sx>1?', and star colonies pay extra for imports':''}.`:'Neither made nor wanted here: middle prices.';
     return {title:g.name,eyebrow:`${st.name} · ${LOT[g.unit]}`,headRight:`<span class="mono" style="font-size:20px">${usd(o.local)}</span>`,rebuild:null,
-      body:`<p class="small">${why}</p><dl class="kv"><dt>Usual here</dt><dd>${usd(lo)}–${usd(hi)}${today?` · ${today} today`:''}</dd><dt>Buy price</dt><dd>${usd(bp)}</dd><dt>Sell price</dt><dd>${usd(sp)}</dd>${rb>0?`<dt>Standing bonus</dt><dd class="up">+${Math.round(rb*100)}% · ${repTier(S.loc)}</dd>`:''}<dt>In hold</dt><dd>${qfmt(h)}${c&&c.q?` · avg ${usd(c.cost/c.q)}`:''}</dd><dt>Station stock</dt><dd>${o.stock?qfmt(o.stock):o.sells?'sold out today':'buys only'}</dd><dt>Can buy</dt><dd>${maxBuy}${!o.stock&&o.sells?' · new stock on your next visit':''}</dd><dt>Mass per lot</dt><dd>${g.kg>=1000?'1 t':g.kg+' kg'}</dd></dl>
+      body:`<p class="small">${why}</p><dl class="kv"><dt>Usual here</dt><dd>${usd(lo)}–${usd(hi)}${today?` · ${today} today`:''}</dd><dt>Buy price</dt><dd>${usd(bp)}</dd><dt>Sell price</dt><dd>${usd(sp)}</dd>${rb>0?`<dt>Standing bonus</dt><dd class="up">+${Math.round(rb*100)}% · ${repTier(S.loc)}</dd>`:''}<dt>In hold</dt><dd>${qfmt(h)}${c&&c.q?` · avg ${usd(c.cost/c.q)}`:''}</dd><dt>Station stock</dt><dd>${o.stock?qfmt(o.stock):'sold out today'}</dd><dt>Can buy</dt><dd>${maxBuy}${!o.stock&&o.sells?' · new stock on your next visit':''}</dd><dt>Mass per lot</dt><dd>${g.kg>=1000?'1 t':g.kg+' kg'}</dd></dl>
         ${g.restricted?'<p class="small" style="color:#c9b9a8">Export controlled: non-dollar stations may inspect it.</p>':''}${g.perish?'<p class="small" style="color:#c9b9a8">Perishable: loses 3% per travel day.</p>':''}
         <div class="trade-row"><input type="range" id="qty-r" min="0" max="${mx}" value="${q0}" aria-label="Quantity"><input type="number" id="qty" min="0" max="${mx}" value="${q0}" aria-label="Quantity"></div><p class="small mono" id="qty-note"></p>
         <div class="grid2"><button class="btn ghost" type="button" id="b-max" ${maxBuy<1?'disabled':''}>Max (${maxBuy})</button><button class="btn ghost" type="button" id="b-all" ${h<=0?'disabled':''}>All (${qfmt(h)})</button></div>`,
@@ -914,7 +984,7 @@ function openMove(){
   const build=()=>{
     const stop=s=>{const isHere=s.id===S.loc,p=isHere?null:plan(s.id);const svc=svcList(s).map(x=>SVC[x]).join(' · ');
       const cost=isHere?'you are here':`${p.days} ${p.days>1?'days':'day'}`;
-      return `<li><button class="stop${s.sys==='star'?' star':''}${isHere?' here':''}${p&&!p.ok?' off':''}" type="button" data-id="${s.id}" ${isHere?'disabled':''}><i></i><span class="nm"><b>${short(s.name)}</b><span>${svc||(s.sys==='star'?s.place.split(' · ')[1]:'')}</span></span><span class="cost">${cost}</span></button></li>`;};
+      return `<li><button class="stop${s.sys==='star'?' star':''}${isHere?' here':''}${p&&!p.ok?' off':''}" type="button" data-id="${s.id}" ${isHere?'disabled':''}><i></i><span class="nm"><b>${short(s.name)}</b><span>${[evTag(s.id),svc||(s.sys==='star'?s.place.split(' · ')[1]:'')].filter(Boolean).join(' · ')}</span></span><span class="cost">${cost}</span></button></li>`;};
     const note=`<p class="small muted" style="margin-bottom:8px">Travel is free. Each day in transit adds interest and moves the markets.</p>`;
     const list=note+`<ul class="line"><h4>Solar System · 1 day a trip</h4>${STATIONS.filter(s=>s.sys==='sol').map(stop).join('')}<h4>Interstellar · longer trips, bigger prices</h4>${STATIONS.filter(s=>s.sys==='star').map(stop).join('')}</ul>`;
     return {title:'Move',eyebrow:`Day ${S.day} of ${S.total} · ${usd(S.cash)} cash`,rebuild:null,
@@ -962,9 +1032,14 @@ function codexHTML(){
     <li><b>Bonded warehouse</b><span>At Ceres: store cargo for $15,000 per tonne per day, paid when you withdraw. Food does not spoil there, and inspectors cannot board cargo you are not carrying.</span><span class="sub">Real-world root: bonded warehouses, where imported goods wait without paying duty until they are withdrawn</span></li>
     <li><b>Hull and cargo insurance</b><span>At Gateway: a 10-day policy for $2.5M plus 1% of your cargo's cost. It pays $150,000 per hull point lost to debris, storms or faults, and the cost of electronics ruined by storms.</span><span class="sub">Real-world root: Lloyd's of London, which began around 1689 in Edward Lloyd's coffee house as a place to buy marine insurance</span></li>
     <li><b>Hull yard</b><span>At Utopia: hull plating ($15M) cuts damage from debris, storms and faults by 40%.</span><span class="sub">Real-world root: Utopia Planitia, where China's Zhurong rover landed on May 14, 2021. Tune figures are game assumptions; studies of advanced nuclear-thermal engines target specific impulse near 1,000 s (about 9.8 km/s)</span></li></ul></div>
+  <div><h3>Market events</h3><ul>
+    <li><b>Every mission has its own event tree,</b> sized to its length: about one story arc every 6 days (5 in a 30-day mission, 8 in 45, 10 in 60). The Daily Mission's tree is the same for every probe.</li>
+    <li><b>An arc</b> often starts with a rumor a few days ahead. Then one stop hits a shortage (prices ×2–3.5, stock thin: sell there) or a glut (prices ×0.25–0.5, stock piled high: buy there) for 2–4 days.</li>
+    <li><b>Then it branches:</b> the shortage worsens, spreads to the nearest stop, swings the other way as convoys overshoot, or fades. Headlines from the stars arrive as late as their light.</li>
+    <li>Watch Trades for headlines and the Move list for ▲ / ▼ tags.</li></ul></div>
   <div><h3>How trading works</h3><ul>
     <li><b>Prices follow one rule.</b> Each good has a base price. Stops that make it sell at ${Math.round(PBAND.make[0]*100)}–${Math.round(PBAND.make[1]*100)}% of base, neutral stops trade at ${Math.round(PBAND.n[0]*100)}–${Math.round(PBAND.n[1]*100)}%, and stops that want it pay ${Math.round(PBAND.want[0]*100)}–${Math.round(PBAND.want[1]*100)}%. Star colonies pay ${STAR_X}× more for the goods they import. Buy where it is made, sell where it is wanted.</li>
-    <li><b>Markets move.</b> Prices drift inside each stop's range on trends that turn every few days, so the trade sheet shows the usual range and where today sits. Shortages and KESTREL dumps hit without warning. Which goods a stop trades is fixed for the mission.</li>
+    <li><b>Markets move.</b> Prices drift inside each stop's range on trends that turn every few days, so the trade sheet shows the usual range and where today sits. Every stop buys and sells every good, so there is always something to trade. Market events (above) and small surprise shortages and KESTREL dumps break the pattern.</li>
     <li><b>Travel is free; time is not.</b> Halyard's service contract covers your refuelling at every stop. What a trip costs is days: interest keeps growing, markets keep moving and contracts keep their deadlines. Star trips take 2–7 days.</li>
     <li><b>All prices are in dollars.</b> The three blocs run their own stations, banks and inspectors, but trade settles in dollars on the common clock. Spread 0.5% in-system, 3% at the stars.</li>
     <li><b>Best trades</b> shows each trade's profit after spreads, ranked by profit per day of travel.</li>
