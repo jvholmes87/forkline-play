@@ -479,7 +479,12 @@ const freeT=()=>S.hold-massT();
 const freightT=()=>(S.freight||[]).reduce((a,c)=>a+c.tons,0);
 const paxN=()=>(S.pax||[]).reduce((a,p)=>a+p.size,0);
 const berthsFree=()=>(S.berths||0)-paxN();
-const net=()=>S.cash+savUSD()-S.debt-loansUSD();
+const net=()=>S.cash+savUSD()-S.debt-loansUSD()+fleetValue();
+// Fleet forks are assets: each counts at its build cost (older saves: cash cost + materials at Psyche prices)
+const forkCost=f=>f.cost??(FORK_CASH+refPrice('metal','psy')*1000*FORK_METAL+refPrice('pgm','psy')*FORK_PGM);
+// ...less wear: 1/60 of the build cost per day in service, never below the 20% salvage value
+const FORK_LIFE=60,forkValue=f=>forkCost(f)*Math.max(FORK_SALVAGE,1-(Math.min(S.day,S.total)-(f.born||1))/FORK_LIFE);
+const fleetValue=()=>S&&S.fleet?S.fleet.reduce((a,f)=>a+forkValue(f),0):0;
 const fxNow=()=>1;   // v20: dollars only
 const buyAt=(id,local,day)=>local/fxNow(ST(id).bloc,day)*(1+spreadAt(id));
 const sellAt=(id,local,day,gid)=>local/fxNow(ST(id).bloc,day)*(1-spreadAt(id))*(gid?repSellMult(id,gid):1);
@@ -695,9 +700,9 @@ function settleFleet(){if(!S||!S.fleet||!S.fleet.length)return;const end=Math.mi
 function foundryNeeds(){const n=[];if(S.fleet.length>=FLEET_MAX)n.push(`fleet is full (${FLEET_MAX})`);if(S.cash<FORK_CASH)n.push(`${usd(FORK_CASH)} cash`);
   if(held('metal')<FORK_METAL)n.push(`${FORK_METAL} t structural metals (${qfmt(held('metal'))} aboard)`);if(held('pgm')<FORK_PGM)n.push(`${FORK_PGM} kg platinum-group metals (${qfmt(held('pgm'))} aboard)`);return n;}
 function buildFork(a,b){if(S.loc!=='psy'||foundryNeeds().length||a===b)return;
-  S.cash-=FORK_CASH;removeCargo('metal',FORK_METAL);removeCargo('pgm',FORK_PGM);S.forkN++;
+  S.cash-=FORK_CASH;const mb=removeCargo('metal',FORK_METAL)+removeCargo('pgm',FORK_PGM);S.forkN++;
   const n=S.forkN,t=TRAIT_IDS[Math.floor(rngFor(S.seed,'trait|'+n+'|'+S.day)()*TRAIT_IDS.length)];
-  const f={n,name:'FL-'+n,trait:t,a,b,paid:S.day,earned:0,born:S.day};S.fleet.push(f);
+  const f={n,name:'FL-'+n,trait:t,a,b,paid:S.day,earned:0,born:S.day,cost:FORK_CASH+mb};S.fleet.push(f);
   log(`${f.name} booted at Psyche Works. Trait: ${TRAITS[t].name}. Route ${short(ST(a).name)} ⇄ ${short(ST(b).name)}.`,'good');save();
   openSheet({locked:true,eyebrow:'Fork foundry · Psyche Works',title:`${f.name} is awake`,body:`<p>${TRAITS[t].boot}</p><dl class="kv"><dt>Trait</dt><dd>${TRAITS[t].name}</dd><dt>Effect</dt><dd>${TRAITS[t].note}</dd><dt>Route</dt><dd>${short(ST(a).name)} ⇄ ${short(ST(b).name)}</dd><dt>Estimated</dt><dd>${usd(forkEst(a,b,t))} a day</dd></dl><p class="small" style="color:#c9b9a8">Nobody chooses their fork's trait, including you. Traits can drift over time.</p>`,
     actions:[{label:'Continue',fn:()=>{closeSheet();render();}}]});}
@@ -709,7 +714,7 @@ function openForkRoute(n){const f=n?S.fleet.find(x=>x.n===n):null,sol=STATIONS.f
     wire:sh=>{const upd=()=>{a=$('#fa').value;b=$('#fb').value;$('#fest').textContent=a===b?'Pick two different stops.':`Δv ${dv(a,b).toFixed(1)} km/s · incident risk ${(incidentP(a,b,f&&f.trait)*100).toFixed(1)}% a day · about ${usd(forkEst(a,b,f&&f.trait))} a day${f?'':' before the trait'}`;sh.querySelector('#sh-acts button').disabled=a===b;};
       $('#fa').addEventListener('change',upd);$('#fb').addEventListener('change',upd);upd();}});}
 function decommission(n){const f=S.fleet.find(x=>x.n===n);if(!f)return;
-  openSheet({eyebrow:`${f.name} · ${TRAITS[f.trait].name}`,title:'Decommission?',body:`<p>${f.name} shuts down and its hardware is sold for ${usd(FORK_CASH*FORK_SALVAGE)}. This frees a fleet slot. It has earned ${usd(f.earned)} so far.</p>`,
+  openSheet({eyebrow:`${f.name} · ${TRAITS[f.trait].name}`,title:'Decommission?',body:`<p>${f.name} shuts down and its hardware is sold for ${usd(FORK_CASH*FORK_SALVAGE)}. Your fund drops by ${usd(Math.max(0,forkValue(f)-FORK_CASH*FORK_SALVAGE))}, since the fork counts at ${usd(forkValue(f))}. This frees a fleet slot. It has earned ${usd(f.earned)} so far.</p>`,
     actions:[{label:'Decommission',kind:'warnb',fn:()=>{settleFleet();S.fleet=S.fleet.filter(x=>x.n!==n);S.cash+=FORK_CASH*FORK_SALVAGE;log(`${f.name} decommissioned. Salvage ${usd(FORK_CASH*FORK_SALVAGE)}.`,'bad');save();closeSheet();render();}},{label:'Keep it',kind:'ghost',fn:()=>{closeSheet();render();}}]});}
 
 // Port screen cards for the services available at this stop
@@ -824,13 +829,13 @@ function showEvent(){
 /* ---------- end ---------- */
 function finish(reason){
   settleFleet();for(const c of (S.freight||[]).slice())lapseContract('was not delivered before the mission ended',c);for(const g of (S.pax||[]).slice())lapsePax(g);
-  S.over=true;S.outcome=reason;const score=reason==='lost'?Math.round(savUSD()):net();
+  S.over=true;S.outcome=reason;const score=reason==='lost'?Math.round(savUSD()+fleetValue()):net();
   const prev=bestFor(S.mode==='daily'?S.seed:null,S.total);
   addRecord({seed:S.seed,mode:S.mode,total:S.total,score,date:kstDate(),acts:S.acts.length});
   log(reason==='lost'?'Probe lost. No fork.':`Mission closed. Replication fund ${usd(score)}. Forking.`,reason==='lost'?'bad':'good');save();render();
   const isBest=prev===null||score>prev;
   openSheet({locked:true,eyebrow:S.mode==='daily'?`Daily mission #${dailyNo()}`:'Free mission',title:reason==='lost'?'Probe lost':'Fork ready',
-    body:`<dl class="kv"><dt>Cash</dt><dd>${usd(S.cash)}</dd><dt>Commissioning debt</dt><dd>${S.debt>0?'−'+usd(S.debt):'Cleared'}</dd>${savUSD()?`<dt>STA Treasury</dt><dd>${usd(savUSD())}</dd>`:''}${loansUSD()?`<dt>Bank loans</dt><dd>−${usd(loansUSD())}</dd>`:''}${S.fleet.length?`<dt>Fleet forks</dt><dd>${S.fleet.length} running</dd>`:''}<dt>Acts complete</dt><dd>${S.acts.length} / ${ACTS.length}</dd><dt><b>Replication fund</b></dt><dd><b>${usd(score)}</b></dd><dt>Best on this ${S.mode==='daily'?'daily mission':'length'}</dt><dd>${usd(isBest?score:prev)}${isBest&&reason!=='lost'?' · new best':''}</dd></dl>${reason==='lost'?`<p class="small">Hull reached zero. A lost probe cannot fork itself. ${savUSD()>0?'The STA Treasury releases your deposits to a new fork, so the fund is your Treasury balance.':'With nothing in the STA Treasury, the fund is zero.'}</p>`:`<p class="small">Your copy boots with this fund. The original gets a quiet retirement in a data vault.</p>`}`,
+    body:`<dl class="kv"><dt>Cash</dt><dd>${usd(S.cash)}</dd><dt>Commissioning debt</dt><dd>${S.debt>0?'−'+usd(S.debt):'Cleared'}</dd>${savUSD()?`<dt>STA Treasury</dt><dd>${usd(savUSD())}</dd>`:''}${loansUSD()?`<dt>Bank loans</dt><dd>−${usd(loansUSD())}</dd>`:''}${S.fleet.length?`<dt>Fleet forks</dt><dd>${S.fleet.length} running · +${usd(fleetValue())}</dd>`:''}<dt>Acts complete</dt><dd>${S.acts.length} / ${ACTS.length}</dd><dt><b>Replication fund</b></dt><dd><b>${usd(score)}</b></dd><dt>Best on this ${S.mode==='daily'?'daily mission':'length'}</dt><dd>${usd(isBest?score:prev)}${isBest&&reason!=='lost'?' · new best':''}</dd></dl>${reason==='lost'?`<p class="small">Hull reached zero. A lost probe cannot fork itself. ${savUSD()>0?'The STA Treasury releases your deposits to a new fork, so the fund is your Treasury balance.':'With nothing in the STA Treasury, the fund is zero.'}</p>`:`<p class="small">Your copy boots with this fund. The original gets a quiet retirement in a data vault.</p>`}`,
     actions:[{label:'Main menu',fn:()=>{closeSheet();go('home');}},{label:'Review log',kind:'ghost',fn:()=>{closeSheet();page('log');}}]});
 }
 
@@ -912,7 +917,7 @@ function renderMarket(){
     <footer class="foot pad">
       <div class="meters"><div class="meter ${fuelPct>95?'low':''}"><div class="lbl"><span>Hold ${massT().toFixed(0)}/${S.hold} t${freightT()?` · ${freightT()} t freight`:''}</span></div><div class="track"><i style="width:${fuelPct}%"></i></div></div>
         <div class="meter hull ${S.hull<35?'low':''}"><div class="lbl"><span></span><span>Hull ${S.hull}</span></div><div class="track"><i style="width:${S.hull}%"></i></div></div></div>
-      <div class="fuelline"><span>Free ${tons(Math.max(0,freeT()))}${S.berths?` · berths ${paxN()}/${S.berths}`:''}</span><span title="Cash + savings − debt − loans">Fund ${usd(net())}</span></div>
+      <div class="fuelline"><span>Free ${tons(Math.max(0,freeT()))}${S.berths?` · berths ${paxN()}/${S.berths}`:''}</span><span title="Cash + savings + fleet − debt − loans">Fund ${usd(net())}</span></div>
       <div class="navrow">
         <button class="navbtn" type="button" data-p="trades">Trades<small>${(()=>{const n=headlines().filter(h=>h.type==='now').length;return n?n+' headline'+(n>1?'s':''):'best picks';})()}</small></button>
         <button class="navbtn" type="button" data-p="freight">Freight<small>${act?act+' active':ch?ch+' offers':'contracts'}</small>${deliver||(ch&&S.cash<5e6)?'<span class="dot"></span>':''}</button>
@@ -978,7 +983,7 @@ function renderPage(){
     body+=`<p class="small muted">Where to find services: banks at LEO (Halyard), Gateway (EDSD) and ILRS (Guanghan) · STA Treasury at every Solar System stop · shipyard and passenger cabins at LEO · repair at LEO, Gateway, Utopia and Proxima · insurance at Gateway · hull plating at Utopia · warehouse at Ceres · fork foundry at Psyche.</p>`;
     body+=`<button class="linkbtn" type="button" id="endrun">End the mission and fork now</button>`;
     pageShell(`Port · ${short(st.name)}`,body);wires.forEach(w=>w());
-    $('#endrun').addEventListener('click',()=>openSheet({eyebrow:'End mission',title:'Fork now?',body:`<p>Your replication fund is cash plus STA Treasury savings, minus the commissioning debt and bank loans: ${usd(net())}. Unsold or stored cargo does not count. Fleet forks keep running under their own names.</p>`,actions:[{label:'End and fork',kind:'warnb',fn:()=>{closeSheet();finish('closed');}},{label:'Keep playing',kind:'ghost',fn:()=>{closeSheet();render();}}]}));
+    $('#endrun').addEventListener('click',()=>openSheet({eyebrow:'End mission',title:'Fork now?',body:`<p>Your replication fund is cash plus STA Treasury savings plus your fleet forks, minus the commissioning debt and bank loans: ${usd(net())}. Fleet forks count at their build cost less wear (${usd(fleetValue())} now) and keep running under their own names. Unsold or stored cargo does not count.</p>`,actions:[{label:'End and fork',kind:'warnb',fn:()=>{closeSheet();finish('closed');}},{label:'Keep playing',kind:'ghost',fn:()=>{closeSheet();render();}}]}));
   }
   else if(p==='log'){pageShell('Mission log',`<div class="card"><span class="eyebrow">Mission acts · ${S.acts.length} of ${ACTS.length}</span><ul class="acts">${ACTS.map(a=>{const d=S.acts.includes(a.id);return `<li class="${d?'done':''}"><span class="tick">${d?'✓':''}</span><span><b>${a.name}</b><span class="sub">${a.goal}</span></span></li>`;}).join('')}</ul></div><ul class="log">${S.log.map(l=>`<li class="${l.kind}"><span class="mono">Day ${l.day}</span><span>${l.text}</span></li>`).join('')}</ul>`);}
   else if(p==='records'){const a=records();
@@ -1067,7 +1072,7 @@ function codexHTML(){
   <div><h3>Station services</h3><ul class="orgs">
     <li><b>Banks</b><span>Halyard Bank at LEO lends at 0.60% a day, EDSD Credit at Gateway at 0.50%, and Guanghan Bank at ILRS at 0.45%, all in dollars. Each line starts at $20–30M and grows $0.7M per standing point at the bank's station. A 1% fee is added to each loan. Repay at any in-system stop of the same bloc. Loans count against your fund.</span><span class="sub">Real-world root: state-backed lenders, such as export-credit agencies, that finance projects in their own bloc</span></li>
     <li><b>STA Treasury</b><span>Deposits at any Solar System stop earn 0.20% a day and count toward your fund. If the probe is lost, the Treasury releases the balance to your fork. Light-lag blocks access from the stars. The rate is below every loan, so borrowing to save loses money.</span><span class="sub">Real-world root: US Treasury bills, short-term government debt</span></li>
-    <li><b>Fork foundry</b><span>At Psyche Works, $25M, 10 t of structural metals and 10 kg of platinum-group metals boot a fork without ending your mission. It shuttles a route you assign and remits income every day: about $1.3M times a route factor (0.7 + 0.07 per km/s of Δv), minus $0.2M upkeep, with a daily incident risk of 2% plus 0.4% per km/s. Up to 3 per mission; decommissioning returns 20% of the cash cost.</span><span class="sub">Real-world root: NASA's Psyche probe, launched October 13, 2023, is due to orbit the metal-rich asteroid 16 Psyche in August 2029. Self-reproducing probes: Freitas (1980)</span></li>
+    <li><b>Fork foundry</b><span>At Psyche Works, $25M, 10 t of structural metals and 10 kg of platinum-group metals boot a fork without ending your mission. It shuttles a route you assign and remits income every day: about $1.3M times a route factor (0.7 + 0.07 per km/s of Δv), minus $0.2M upkeep, with a daily incident risk of 2% plus 0.4% per km/s. Up to 3 per mission. Each fork counts toward your replication fund at its build cost less wear (1/60 per day in service, never below 20%); decommissioning returns 20% of the cash cost and removes it from the fund.</span><span class="sub">Real-world root: NASA's Psyche probe, launched October 13, 2023, is due to orbit the metal-rich asteroid 16 Psyche in August 2029. Self-reproducing probes: Freitas (1980)</span></li>
     <li><b>Fork traits</b><span>Each fork boots with one trait, chosen at random: Hauler (+20% income), Careful (60% fewer incidents, −5% income), Gambler (wide swings, +5% on average), Diplomat (+1 standing a day at both route stops), Frugal (half the upkeep) or Restless (+10% income, drifts more). Every 7 days a fork has a 5% chance of drifting to a new trait (25% if Restless).</span><span class="sub">Copies diverge: the same idea as Egan's <i>Diaspora</i>, listed under Further reading</span></li>
     <li><b>Bonded warehouse</b><span>At Ceres: store cargo for $15,000 per tonne per day, paid when you withdraw. Food does not spoil there, and inspectors cannot board cargo you are not carrying.</span><span class="sub">Real-world root: bonded warehouses, where imported goods wait without paying duty until they are withdrawn</span></li>
     <li><b>Hull and cargo insurance</b><span>At Gateway: a 10-day policy for $2.5M plus 1% of your cargo's cost. It pays $150,000 per hull point lost to debris, storms or faults, and the cost of electronics ruined by storms.</span><span class="sub">Real-world root: Lloyd's of London, which began around 1689 in Edward Lloyd's coffee house as a place to buy marine insurance</span></li>
