@@ -200,6 +200,19 @@ tr.pick{cursor:pointer} tr.pick:hover td{background:var(--panel2)}
 .standing .track i{display:block;height:100%;background:var(--ice)}
 .standing .here span:first-child{color:var(--amber)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* Desktop star map backdrop (v18): fills the side gutters on wide screens; the game panel stays on top */
+#bgmap,#bglabels,#bghint{display:none}
+@media (min-width:900px){
+  #app{z-index:1}
+  #bgmap{display:block;position:fixed;inset:0;width:100vw;height:100vh;z-index:0}
+  #bglabels{display:block;position:fixed;inset:0;z-index:0;pointer-events:none}
+  #bghint{display:block;position:fixed;left:18px;bottom:14px;z-index:0;font:500 10.5px/1.4 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:#5d6b80;pointer-events:none}
+}
+.bgl{position:absolute;left:0;top:0;background:none;border:0;padding:3px 6px;margin:0;font:500 10.5px/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:#95a2b6;white-space:nowrap;pointer-events:auto;cursor:pointer;border-radius:3px}
+.bgl:hover,.bgl:focus-visible{color:var(--ink);background:rgba(16,28,48,.85)}
+.bgl.here{color:var(--good)} .bgl.sel{color:var(--amber)} .bgl.ref{color:#5d6b80;pointer-events:none;cursor:default}
+.bgcap{position:absolute;bottom:40px;transform:translateX(-50%);font:500 10.5px/1.4 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:#5d6b80;white-space:nowrap;pointer-events:none}
+
 </style>
 
 <div id="app">
@@ -1112,6 +1125,117 @@ function codexHTML(){
     <li>Robert A. Freitas Jr., "A Self-Reproducing Interstellar Probe," <i>Journal of the British Interplanetary Society</i> (1980).</li>
     <li>Paul Krugman, "The Theory of Interstellar Trade" (written 1978): the source of this game's interest rule.</li></ul></div></div>`;
 }
+
+
+/* ---------- desktop star map backdrop (v18) ---------- */
+(function(){
+  const MQ=window.matchMedia('(min-width: 900px)'),REDUCE=window.matchMedia('(prefers-reduced-motion: reduce)');
+  const THREE_URL='https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+  let loading=false,map=null;
+  function want(){if(!MQ.matches)return;if(map){map.wake();return;}if(loading)return;loading=true;
+    if(window.THREE)return init();
+    const s=document.createElement('script');s.src=THREE_URL;s.async=true;s.onload=init;s.onerror=()=>{loading=false;};document.head.appendChild(s);}
+  (MQ.addEventListener?MQ.addEventListener('change',want):MQ.addListener(want));
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',want);else want();
+
+  function init(){try{map=build();}catch(e){console.warn('Star map unavailable:',e&&e.message);}}
+
+  function glowTex(T){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d'),r=g.createRadialGradient(32,32,0,32,32,32);
+    r.addColorStop(0,'rgba(255,255,255,1)');r.addColorStop(.25,'rgba(255,255,255,.55)');r.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=r;g.fillRect(0,0,64,64);return new T.CanvasTexture(c);}
+
+  function build(){
+    const T=window.THREE,BLOC={USD:0xf2a93b,EUR:0x86c9ea,CNY:0xf2705f},STAR_COL={prox:0xff8a6a,barn:0xff7050,tau:0xffe2a6};
+    const cv=document.createElement('canvas');cv.id='bgmap';cv.setAttribute('aria-hidden','true');
+    const lab=document.createElement('div');lab.id='bglabels';
+    const hint=document.createElement('div');hint.id='bghint';hint.textContent='Click a stop to plot a route';
+    const capL=document.createElement('div'),capR=document.createElement('div');capL.className=capR.className='bgcap';capL.textContent='Solar System · log scale from Earth';capR.textContent='Nearby stars · true directions';lab.appendChild(capL);lab.appendChild(capR);
+    document.body.prepend(hint);document.body.prepend(lab);document.body.prepend(cv);
+    const R=new T.WebGLRenderer({canvas:cv,antialias:true,powerPreference:'low-power'});R.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));
+    const scene=new T.Scene();scene.background=new T.Color(0x070d18);
+    const cam=new T.PerspectiveCamera(35,1,1,4000);cam.position.set(0,0,240);cam.lookAt(0,0,0);
+    scene.add(new T.AmbientLight(0x8090a8,.75));const sun=new T.DirectionalLight(0xfff1d8,.9);sun.position.set(-1,1.2,1.5);scene.add(sun);
+    const GLOW=glowTex(T),sprite=(col,s,op)=>{const m=new T.Sprite(new T.SpriteMaterial({map:GLOW,color:col,transparent:true,opacity:op??1,depthWrite:false,blending:T.AdditiveBlending}));m.scale.set(s,s,1);return m;};
+    // starfield
+    {const n=1400,p=new Float32Array(n*3);for(let i=0;i<n;i++){const u=Math.random()*2-1,a=Math.random()*Math.PI*2,r=700+Math.random()*900,q=Math.sqrt(1-u*u);p[i*3]=r*q*Math.cos(a);p[i*3+1]=r*q*Math.sin(a);p[i*3+2]=-Math.abs(r*u)-200;}
+      const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(p,3));scene.add(new T.Points(g,new T.PointsMaterial({color:0xaab8d0,size:1.6,sizeAttenuation:false,transparent:true,opacity:.7})));}
+    // left: in-system stops, Earth-centred log scale (same mapping as the in-game Chart)
+    const left=new T.Group(),leftDisc=new T.Group();left.add(leftDisc);leftDisc.rotation.x=-1.08;scene.add(left);
+    const right=new T.Group(),rightSpin=new T.Group();right.add(rightSpin);scene.add(right);
+    const logR=km=>Math.pow(Math.max(0,(Math.log10(km)-3.6)/(Math.log10(4.4e8)-3.6)),.7);
+    [[1e4],[1e6],[1.496e8]].forEach(([km])=>{const r=logR(km),pts=[];for(let i=0;i<=96;i++){const a=i/96*Math.PI*2;pts.push(new T.Vector3(r*Math.cos(a),r*Math.sin(a),0));}
+      leftDisc.add(new T.Line(new T.BufferGeometry().setFromPoints(pts),new T.LineBasicMaterial({color:0x25385a,transparent:true,opacity:.8})));});
+    const earth=new T.Mesh(new T.SphereGeometry(.035,20,14),new T.MeshStandardMaterial({color:0x5aa8e0,roughness:.6}));leftDisc.add(earth);leftDisc.add(sprite(0x86c9ea,.16,.5));
+    const nodes={},labels={};
+    const mkLabel=(id,text,cls)=>{const b=document.createElement('button');b.type='button';b.className='bgl'+(cls?' '+cls:'');b.textContent=text;if(id){b.dataset.id=id;b.setAttribute('aria-label',`Plot route to ${text}`);b.addEventListener('click',()=>pick(id));}lab.appendChild(b);return b;};
+    const refLabels=[];
+    refLabels.push({el:mkLabel(null,'Earth','ref'),obj:earth});
+    for(const s of STATIONS.filter(x=>x.sys==='sol')){const r=logR(s.km),a=(s.ang-90)*Math.PI/180;
+      const m=new T.Mesh(new T.OctahedronGeometry(.028),new T.MeshStandardMaterial({color:BLOC[s.bloc],emissive:BLOC[s.bloc],emissiveIntensity:.35,roughness:.4}));
+      m.position.set(r*Math.cos(a),r*Math.sin(a),0);leftDisc.add(m);m.add(sprite(BLOC[s.bloc],.12,.45));nodes[s.id]=m;labels[s.id]=mkLabel(s.id,short(s.name));}
+    // right: Sol and the stars in true directions (ly), lanes from Sol
+    const solDot=sprite(0xffe9b0,.18,.95);rightSpin.add(solDot);refLabels.push({el:mkLabel(null,'Sol','ref'),obj:solDot});
+    const LYS=1/12.5;
+    for(const s of STATIONS.filter(x=>x.sys==='star')){const p=new T.Vector3(s.pos[0],s.pos[2],s.pos[1]).multiplyScalar(LYS);
+      const star=sprite(STAR_COL[s.id]||0xffffff,.22,.95);star.position.copy(p);rightSpin.add(star);
+      const m=new T.Mesh(new T.OctahedronGeometry(.03),new T.MeshStandardMaterial({color:BLOC[s.bloc],emissive:BLOC[s.bloc],emissiveIntensity:.35}));m.position.copy(p).add(new T.Vector3(.05,.045,0));rightSpin.add(m);nodes[s.id]=m;
+      rightSpin.add(new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(),p]),new T.LineDashedMaterial({color:0x25385a,dashSize:.03,gapSize:.025})).computeLineDistances());
+      labels[s.id]=mkLabel(s.id,short(s.name));}
+    // the vessel: hull, nose, radiator panels, engine glow; forward is +x
+    const ship=new T.Group(),hullM=new T.MeshStandardMaterial({color:0xd9d3c4,metalness:.55,roughness:.4});
+    {const body=new T.Mesh(new T.CylinderGeometry(.5,.5,3.2,12),hullM);body.rotation.z=Math.PI/2;ship.add(body);
+     const nose=new T.Mesh(new T.ConeGeometry(.5,1.1,12),hullM);nose.rotation.z=-Math.PI/2;nose.position.x=2.15;ship.add(nose);
+     const panM=new T.MeshStandardMaterial({color:0x2c3a52,metalness:.3,roughness:.7,side:T.DoubleSide});
+     for(const z of[-1,1]){const pan=new T.Mesh(new T.BoxGeometry(2.2,.06,1.5),panM);pan.position.set(-.2,0,z*1.25);ship.add(pan);}
+     const tank=new T.Mesh(new T.SphereGeometry(.62,14,10),new T.MeshStandardMaterial({color:0xf2a93b,metalness:.4,roughness:.5}));tank.position.x=-1.5;ship.add(tank);}
+    const flame=sprite(0x86c9ea,2.6,0);flame.position.x=-2.6;ship.add(flame);ship.add(sprite(0xece6d8,5.5,.22));scene.add(ship);
+    const trailN=48,trailPos=new Float32Array(trailN*3),trailGeo=new T.BufferGeometry();trailGeo.setAttribute('position',new T.BufferAttribute(trailPos,3));
+    const trail=new T.Line(trailGeo,new T.LineBasicMaterial({color:0x86c9ea,transparent:true,opacity:.55}));scene.add(trail);
+    const prevGeo=new T.BufferGeometry().setFromPoints(Array.from({length:40},()=>new T.Vector3()));
+    const preview=new T.Line(prevGeo,new T.LineDashedMaterial({color:0xf2a93b,dashSize:2.2,gapSize:1.6,transparent:true,opacity:.9}));preview.visible=false;scene.add(preview);
+    // layout: fit each half into its gutter
+    let W=0,H=0,unit=1,gutterL=0;
+    function layout(){W=window.innerWidth;H=window.innerHeight;R.setSize(W,H,false);cam.aspect=W/H;cam.updateProjectionMatrix();
+      const panel=Math.min(560,W),gw=(W-panel)/2,wpp=2*cam.position.z*Math.tan(cam.fov*Math.PI/360)/H;
+      unit=Math.min(gw*wpp*.34,H*wpp*.34);gutterL=(panel/2+gw/2)*wpp;
+      left.position.set(-gutterL-gw*wpp*.02,-H*wpp*.02,0);right.position.set(gutterL-gw*wpp*.06,0,0);left.scale.setScalar(unit);right.scale.setScalar(unit*.9);ship.scale.setScalar(unit*.02);
+      const gx=(panel/2+gw/2);capL.style.left=Math.round(W/2-gx)+'px';capR.style.left=Math.round(W/2+gx)+'px';capL.style.display=capR.style.display=gw>150?'':'none';}
+    window.addEventListener('resize',layout);layout();
+    // route geometry in world space: an arc that lifts toward the camera; interstellar arcs pass behind the panel
+    const wp=id=>{const v=new T.Vector3();(nodes[id]||nodes.leo).getWorldPosition(v);return v;};
+    function arc(a,b,t,out){const A=wp(a),B=wp(b),M=A.clone().add(B).multiplyScalar(.5),d=A.distanceTo(B),inter=ST(a).sys!==ST(b).sys;
+      M.y+=d*(inter?.32:.28);M.z+=inter?-unit*.6:unit*.35;const u=1-t;return out.set(u*u*A.x+2*u*t*M.x+t*t*B.x,u*u*A.y+2*u*t*M.y+t*t*B.y,u*u*A.z+2*u*t*M.z+t*t*B.z);}
+    let lastLoc=null,lastDay=null,trip=null;
+    function pick(id){if(!S||S.over||id===S.loc)return;if(sheetSpec&&sheetSpec.locked)return;if(ui.screen!=='market')go('market');openRoute(id);}
+    const tmp=new T.Vector3(),tmp2=new T.Vector3(),fwd=new T.Vector3(1,0,0),proj=new T.Vector3();
+    let running=true,t0=performance.now(),frame=0;
+    function tick(now){if(!running)return;requestAnimationFrame(tick);if(document.hidden||!MQ.matches)return;
+      const dt=Math.min(.05,(now-t0)/1000);t0=now;frame++;const still=REDUCE.matches;
+      if(!still){leftDisc.rotation.z+=dt*.012;rightSpin.rotation.y+=dt*.035;}
+      const loc=S&&S.loc&&nodes[S.loc]?S.loc:'leo',day=S?S.day:0;
+      if(lastLoc===null){lastLoc=loc;lastDay=day;}
+      if(loc!==lastLoc){if(day>lastDay&&!still){trip={a:lastLoc,b:loc,t:0,dur:ST(lastLoc).sys!==ST(loc).sys||ST(loc).sys==='star'?3.6:2.2};const s0=arc(trip.a,trip.b,0,proj);for(let i=0;i<trailN;i++){trailPos[i*3]=s0.x;trailPos[i*3+1]=s0.y;trailPos[i*3+2]=s0.z;}trail.material.opacity=.55;}lastLoc=loc;lastDay=day;}
+      else lastDay=day;
+      // vessel
+      let pos,dir;
+      if(trip){trip.t=Math.min(1,trip.t+dt/trip.dur);const e=trip.t<.5?2*trip.t*trip.t:1-Math.pow(-2*trip.t+2,2)/2;pos=arc(trip.a,trip.b,e,tmp);dir=arc(trip.a,trip.b,Math.min(1,e+.01),tmp2).sub(pos);
+        flame.material.opacity=.95;for(let i=trailN-1;i>0;i--){trailPos[i*3]=trailPos[i*3-3];trailPos[i*3+1]=trailPos[i*3-2];trailPos[i*3+2]=trailPos[i*3-1];}
+        trailPos[0]=pos.x;trailPos[1]=pos.y;trailPos[2]=pos.z;trailGeo.attributes.position.needsUpdate=true;trail.visible=true;if(trip.t>=1)trip=null;}
+      else{pos=wp(loc).add(tmp2.set(unit*.06,unit*.05,unit*.02));pos.y+=still?0:Math.sin(now/900)*unit*.006;dir=tmp2.set(1,.15,0);flame.material.opacity=0;
+        if(trail.visible){trail.material.opacity*=.94;if(trail.material.opacity<.02){trail.visible=false;trail.material.opacity=.55;}}}
+      ship.position.copy(pos);if(dir.lengthSq()>1e-9)ship.quaternion.setFromUnitVectors(fwd,dir.clone().normalize());
+      // route preview while the route sheet is open
+      const target=sel&&S&&sel!==S.loc&&nodes[sel]&&sheetSpec&&!trip?sel:null;
+      if(target){const arr=prevGeo.attributes.position;for(let i=0;i<40;i++){arc(loc,target,i/39,proj);arr.setXYZ(i,proj.x,proj.y,proj.z);}arr.needsUpdate=true;preview.computeLineDistances();preview.visible=true;}
+      else preview.visible=false;
+      // labels follow their stops
+      const place=(el,obj,dx,dy=0)=>{obj.getWorldPosition(proj);proj.project(cam);const x=(proj.x*.5+.5)*W,y=(-proj.y*.5+.5)*H+dy,ok=proj.z<1&&x>4&&x<W-4&&y>4&&y<H-4;el.style.display=ok?'':'none';if(ok)el.style.transform=`translate(${Math.round(x+dx)}px,${Math.round(y-7)}px)`;};
+      for(const id in labels){const el=labels[id];place(el,nodes[id],10,id==='ilrs'?13:0);el.classList.toggle('here',!!S&&id===S.loc);el.classList.toggle('sel',!!target&&id===target);}
+      for(const r of refLabels)place(r.el,r.obj,10);
+      R.render(scene,cam);}
+    requestAnimationFrame(tick);
+    return {wake(){layout();}};
+  }
+})();
 
 /* ---------- boot ---------- */
 function start(data){
