@@ -1198,7 +1198,7 @@ function codexHTML(){
       const panel=Math.min(560,W),gw=(W-panel)/2,wpp=2*cam.position.z*Math.tan(cam.fov*Math.PI/360)/H;
       unit=Math.min(gw*wpp*.34,H*wpp*.34);gutterL=(panel/2+gw/2)*wpp;
       left.position.set(-gutterL-gw*wpp*.02,-H*wpp*.02,0);right.position.set(gutterL-gw*wpp*.06,0,0);left.scale.setScalar(unit);right.scale.setScalar(unit*.9);ship.scale.setScalar(unit*.02);
-      const gx=(panel/2+gw/2);capL.style.left=Math.round(W/2-gx)+'px';capR.style.left=Math.round(W/2+gx)+'px';capL.style.display=capR.style.display=gw>150?'':'none';}
+      const gx=(panel/2+gw/2);capL.style.left=Math.round(W/2-gx)+'px';capR.style.left=Math.round(W/2+gx)+'px';capL.style.display=capR.style.display=gw>340?'':'none';hint.style.display=gw>250?'':'none';}
     window.addEventListener('resize',layout);layout();
     // route geometry in world space: an arc that lifts toward the camera; interstellar arcs pass behind the panel
     const wp=id=>{const v=new T.Vector3();(nodes[id]||nodes.leo).getWorldPosition(v);return v;};
