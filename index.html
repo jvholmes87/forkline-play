@@ -200,6 +200,14 @@ tr.pick{cursor:pointer} tr.pick:hover td{background:var(--panel2)}
 .standing .track{height:5px;background:var(--line);border-radius:3px;overflow:hidden}
 .standing .track i{display:block;height:100%;background:var(--ice)}
 .standing .here span:first-child{color:var(--amber)}
+.tip{position:absolute;left:12px;right:12px;z-index:15;background:#13233b;border:1px solid var(--ice);border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:30px 1fr;gap:4px 10px;box-shadow:0 8px 24px rgba(0,0,0,.45);animation:tipin .25s ease-out}
+.tip .ic{font-size:22px;line-height:1.2;grid-row:span 2}.tip p{margin:0;font-size:15px;line-height:1.4;color:var(--ink)}
+.tip .kind{font:500 10.5px/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ice)}
+.tip.discover{border-color:var(--amber)}.tip.discover .kind{color:var(--amber)}.tip.nudge{border-color:var(--good)}.tip.nudge .kind{color:var(--good)}
+.tip .tb{grid-column:2;display:flex;gap:8px;margin-top:6px}.tip .tb button{min-height:40px;padding:0 14px}
+@keyframes tipin{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+.news.remind{border-color:var(--ice)}
+.tipmode{display:flex;gap:6px;margin:8px 0}.tipmode button{flex:1}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 /* Desktop star map backdrop (v18): fills the side gutters on wide screens; the game panel stays on top */
 #bgmap,#bglabels,#bghint{display:none}
@@ -220,6 +228,7 @@ tr.pick{cursor:pointer} tr.pick:hover td{background:var(--panel2)}
   <section class="screen" id="scr-home"></section>
   <section class="screen" id="scr-market" hidden></section>
   <section class="screen" id="scr-page" hidden></section>
+  <div class="tip" id="tip" hidden role="status" aria-live="polite"></div>
   <div class="scrim" id="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sh-title"></div></div>
 </div>
 
@@ -558,6 +567,72 @@ const evTag=id=>{const h=headlines().find(x=>x.type==='now'&&x.e.stop===id);retu
 function newsHTML(list){return list.length?`<ul class="heads">${list.map(h=>`<li class="${h.type==='rumor'?'rumor':h.e.up?'up':'dn'}"><b>${h.type==='rumor'?'?':h.e.up?'▲':'▼'}</b><span>${h.text}${h.type==='now'?`<span class="sub">${G(h.e.g).name} ×${h.e.m.toFixed(h.e.m<1?2:1)} at ${short(ST(h.e.stop).name)} · ${h.left>0?`${h.left+1} days left`:'last day'}${h.lag?` · report ${h.lag}d old`:''}</span>`:`<span class="sub">${short(ST(h.e.stop).name)}${h.lag?` · report ${h.lag}d old`:''} · not confirmed</span>`}</span></li>`).join('')}</ul>`:'<p class="empty">No headlines today.</p>';}
 function logNews(){S.seenEv=S.seenEv||[];for(const h of headlines()){if(S.seenEv.includes(h.key))continue;S.seenEv.push(h.key);log(h.type==='now'?`News: ${h.text}.`:`News: ${h.text}.`,h.type==='now'?(h.e.up?'good':''):'');}}
 
+/* ---------- tips and notices (v25) ---------- */
+// Spec: Forkline_Notices_Spec.md. Teach when a feature first matters, one notice at a time, short words, one tap to dismiss.
+const TIPS_KEY='forkline-tips-v1';
+let TIPS=(()=>{try{return JSON.parse(localStorage.getItem(TIPS_KEY)||'{}');}catch(e){return {};}})();
+TIPS.seen=TIPS.seen||{};TIPS.stats=TIPS.stats||{};TIPS.mode=TIPS.mode||'guided';TIPS.missions=TIPS.missions||0;
+function tipsSave(){try{localStorage.setItem(TIPS_KEY,JSON.stringify(TIPS));}catch(e){}}
+function tipStat(id,k){const s=TIPS.stats[id]=TIPS.stats[id]||{shown:0,acted:0,dismissed:0};s[k]++;}
+const TIP_PRI={celebrate:0,discover:1,explain:2,nudge:3};
+const TIP_KIND={discover:'New here',explain:'How it works',nudge:'Tip'};
+const toPort=['Open Port',()=>page('port')],toTrades=['Open Trades',()=>page('trades')],toFreight=['Open Freight',()=>page('freight')];
+const svcHere=k=>ST(S.loc).svc.includes(k);
+const TIP_DEF=[
+  {id:'exp-start',kind:'explain',icon:'💡',text:'Green prices are made here, so they are cheap. Orange prices are wanted here. Buy green, then sell where it is orange.',when:()=>S.day===1},
+  {id:'svc-shipyard',kind:'discover',icon:'🏗',text:'Shipyard: a bigger hold, a storm shelter and passenger cabins.',act:toPort,when:()=>S.day>1&&svcHere('shipyard')},
+  {id:'svc-bank',kind:'discover',icon:'🏦',text:()=>`${Object.values(BANKS).find(b=>b.home===S.loc)?.name||'This bank'} lends cash. Loans grow every day, so borrow only for a sure trade.`,act:toPort,when:()=>S.day>1&&svcHere('bank')},
+  {id:'svc-insurance',kind:'discover',icon:'🛡',text:'Buy insurance here before risky trips. It pays you back for hull damage.',act:toPort,when:()=>svcHere('insurance')},
+  {id:'svc-yard',kind:'discover',icon:'🔩',text:'Hull plating here cuts damage from debris, storms and faults by 40%.',act:toPort,when:()=>svcHere('yard')},
+  {id:'svc-warehouse',kind:'discover',icon:'📦',text:'Store cargo here. Food will not spoil, and inspectors cannot touch it.',act:toPort,when:()=>svcHere('warehouse')},
+  {id:'svc-foundry',kind:'discover',icon:'🔧',text:'Build a fork here: a copy of you that earns money every day and counts toward your fund.',act:toPort,when:()=>svcHere('foundry')},
+  {id:'svc-treasury',kind:'discover',icon:'🏛',text:'Spare cash? The STA Treasury pays 0.2% a day at any Solar System stop.',act:toPort,when:()=>S.day>=5&&ST(S.loc).sys==='sol'&&S.cash>60e6},
+  {id:'exp-debt',kind:'explain',icon:'💳',text:'Your debt grows 0.75% a day. Pay it back at LEO, Artemis or Psyche once you are ahead.',when:()=>S.day>=3&&S.debt>0},
+  {id:'exp-event',kind:'explain',icon:'▲',text:'▲ means a stop is short of something: sell it there. ▼ means a glut: buy there. Trades shows every headline.',act:toTrades,when:()=>headlines().some(h=>h.type==='now')},
+  {id:'exp-rumor',kind:'explain',icon:'❓',text:'A rumor hints at a big price change in a few days. Get ready, but it is not confirmed yet.',act:toTrades,when:()=>headlines().some(h=>h.type==='rumor')},
+  {id:'exp-freight',kind:'explain',icon:'🚚',text:'Freight pays you to carry a shipper\'s cargo. You need no money. Pick one going your way.',act:toFreight,when:()=>S.day>=2&&ST(S.loc).sys==='sol'&&openCharters().length>0},
+  {id:'exp-pax',kind:'explain',icon:'🧑‍🚀',text:'Your cabins are ready. Passenger groups wait on the Freight page and pay when they arrive.',act:toFreight,when:()=>S.berths>0},
+  {id:'exp-star',kind:'explain',icon:'📡',text:'Star prices are old news: the report left this star days ago, so prices here may have moved.',when:()=>ST(S.loc).sys==='star'},
+  {id:'nudge-trades',kind:'nudge',icon:'👉',text:'No profit yet? Tap Trades. It lists the best buys here and where to sell them.',act:toTrades,when:()=>S.day>=4&&!S.stats.profitSales},
+  {id:'nudge-empty',kind:'nudge',icon:'👉',text:'You flew with an empty hold. Buy something here before you leave, so every trip earns.',when:()=>!!S.flewEmpty}
+];
+const tipOn=kind=>TIPS.mode==='guided'||(TIPS.mode==='light'&&kind==='celebrate');
+let tipActive=null;
+// Celebrations: a sheet, at most one per game day
+function celebrate(id,title,text){if(TIPS.seen[id]||!tipOn('celebrate'))return;S.celQ=S.celQ||[];if(!S.celQ.some(c=>c.id===id))S.celQ.push({id,title,text});}
+function tipText(t){return typeof t.text==='function'?t.text():t.text;}
+function hideTip(){const el=$('#tip');if(el){el.hidden=true;el.dataset.id='';}const bd=$('#scr-market .body');if(bd)bd.style.paddingBottom='';}
+function showTip(t){const el=$('#tip'),f=$('#scr-market .foot');el.style.bottom=((f?f.offsetHeight:0)+10)+'px';if(!el.hidden&&el.dataset.id===t.id){const bd=$('#scr-market .body');if(bd)bd.style.paddingBottom=(el.offsetHeight+16)+'px';return;}el.dataset.id=t.id;el.className='tip '+t.kind;
+  el.innerHTML=`<span class="ic" aria-hidden="true">${t.icon}</span><span class="kind">${TIP_KIND[t.kind]}</span><p>${tipText(t)}</p><div class="tb">${t.act?`<button class="btn" type="button" id="tip-go">${t.act[0]}</button>`:''}<button class="btn ghost" type="button" id="tip-ok">Got it</button></div>`;
+  el.hidden=false;const bd=$('#scr-market .body');if(bd)bd.style.paddingBottom=(el.offsetHeight+16)+'px';   // keep the goods list scrollable above the tip
+  const done=k=>{TIPS.seen[t.id]=1;tipStat(t.id,k);tipsSave();tipActive=null;hideTip();};
+  $('#tip-ok').addEventListener('click',()=>{done('dismissed');pumpTips();});
+  const g=$('#tip-go');if(g)g.addEventListener('click',()=>{done('acted');t.act[1]();});}
+function pumpTips(){
+  if(!S||S.over||ui.screen!=='market'||sheetSpec||S.event||(S.actQueue&&S.actQueue.length)){hideTip();return;}
+  if(S.celQ&&S.celQ.length&&S.celDay!==S.day){const c=S.celQ.shift();S.celDay=S.day;TIPS.seen[c.id]=1;tipStat(c.id,'shown');tipsSave();hideTip();
+    return openSheet({eyebrow:'Nice work',title:c.title,body:`<p>${c.text}</p>`,actions:[{label:'Continue',fn:()=>{closeSheet();render();}}]});}
+  if(tipActive){if(!TIPS.seen[tipActive.id])return showTip(tipActive);tipActive=null;}
+  if(TIPS.mode!=='guided'){hideTip();return;}
+  const key=S.day+'|'+S.loc;if(!S.tipArr||S.tipArr.k!==key)S.tipArr={k:key,n:0};
+  if(S.tipArr.n>=2){hideTip();return;}
+  const t=TIP_DEF.filter(x=>!TIPS.seen[x.id]).sort((a,b)=>TIP_PRI[a.kind]-TIP_PRI[b.kind]).find(x=>{try{return x.when();}catch(e){return false;}});
+  if(!t){hideTip();return;}
+  tipActive=t;S.tipArr.n++;tipStat(t.id,'shown');tipsSave();showTip(t);}
+// Reminders: shown on the market while they apply (Guided and Light)
+function remindersHTML(){if(!S||TIPS.mode==='off')return '';const r=[],d=S.day,due=by=>by===d?'today':by===d+1?'tomorrow':'';
+  for(const c of S.freight||[])if(due(c.by))r.push(`⏰ Freight to ${short(ST(c.to).name)} is due ${due(c.by)}.`);
+  for(const g of S.pax||[])if(due(g.by))r.push(`⏰ ${g.kind} must reach ${short(ST(g.to).name)} ${due(g.by)}.`);
+  if(S.contract&&due(S.contract.by))r.push(`⏰ The colony request for ${short(ST(S.contract.to).name)} ends ${due(S.contract.by)}.`);
+  if(insured()&&due(S.policy.until))r.push(`🛡 Your insurance ends ${due(S.policy.until)}.`);
+  if(canRepayDebt()&&S.debt>0&&S.cash>S.debt*1.2)r.push('💸 You can clear your whole debt here: Port → Repay.');
+  if(S.total-S.day<=2&&massT()-freightT()>0.01)r.push('⌛ Last days: unsold cargo does not count. Sell before the mission ends.');
+  return r.slice(0,2).map(t=>`<p class="news remind">${t}</p>`).join('');}
+function setTipMode(m){TIPS.mode=m;TIPS.userSet=1;tipsSave();}
+function resetTips(){TIPS.seen={};TIPS.stats={};tipsSave();tipActive=null;if(S){S.celQ=[];S.tipArr=null;}if(ui.screen==='page'&&ui.page==='codex')page('codex');}
+function tipsCodexHTML(){const seen=TIP_DEF.filter(t=>TIPS.seen[t.id]);
+  return `<div><h3>Tips</h3><p class="small muted">Tips: ${TIPS.mode==='guided'?'Guided':TIPS.mode==='light'?'Light (celebrations and reminders)':'Off'}. Change it in the ☰ menu.</p>${seen.length?`<ul>${seen.map(t=>`<li>${t.icon} ${tipText(t)}</li>`).join('')}</ul>`:'<p class="small muted">No tips seen yet.</p>'}<p class="small"><button class="linkbtn" type="button" onclick="resetTips()">Reset tips</button> to see them all again.</p></div>`;}
+
 /* ---------- run lifecycle ---------- */
 function newRun(mode,days){
   const seed=mode==='daily'?'daily-'+kstDate():'run-'+Math.random().toString(36).slice(2,10);
@@ -601,16 +676,16 @@ function plan(dest){
 }
 function jump(){
   if(!sel||S.over||S.event)return;const p=plan(sel);if(!p.ok)return;
-  const from=ST(S.loc).name;
+  const from=ST(S.loc).name;if(!p.inter&&massT()-freightT()<0.01&&S.cash>10e6)S.flewEmpty=true;
   const before=S.debt;S.debt=S.debt>0?S.debt*Math.pow(1+DEBT_RATE,p.days):0;
   S.day+=p.days;
   if(held('food')>0){const lost=held('food')*(1-Math.pow(1-G('food').perish,p.days));removeCargo('food',lost);if(lost>=.05)log(`${lost.toFixed(1)} t of food spoiled in transit.`,'bad');}
   S.loc=sel;sel=null;selGood=null;
   log(`${from} to ${ST(S.loc).name}: ${p.days} ${p.days>1?'days':'day'}.${before?` Debt now ${usd(S.debt)}.`:''}`);
-  for(const c of S.freight.filter(c=>c.to===S.loc)){const pay=c.pay*.6;S.cash+=pay;log(`Supplies delivered: ${c.tons} t ${G(c.good).name}. Balance paid: ${usd(pay)}.`,'good');gainRep(S.loc,8);}
+  for(const c of S.freight.filter(c=>c.to===S.loc)){celebrate('cel-freight','First freight delivered','The shipper paid the rest of your fee. Freight pays without spending your own money, so carry some on trips you are making anyway.');const pay=c.pay*.6;S.cash+=pay;log(`Supplies delivered: ${c.tons} t ${G(c.good).name}. Balance paid: ${usd(pay)}.`,'good');gainRep(S.loc,8);}
   S.freight=S.freight.filter(c=>c.to!==S.loc);
   for(const c of S.freight.filter(c=>S.day>c.by))lapseContract('lapsed',c);
-  for(const g of S.pax.filter(g=>g.to===S.loc)){const pay=g.pay*.75;S.cash+=pay;log(`${g.kind} (${g.size}) disembark at ${ST(S.loc).name}. Fare balance: ${usd(pay)}.`,'good');gainRep(S.loc,4);}
+  for(const g of S.pax.filter(g=>g.to===S.loc)){celebrate('cel-pax','First passengers delivered','They paid the rest of their fare on arrival. Passengers use berths, not hold space, so they ride along with your cargo.');const pay=g.pay*.75;S.cash+=pay;log(`${g.kind} (${g.size}) disembark at ${ST(S.loc).name}. Fare balance: ${usd(pay)}.`,'good');gainRep(S.loc,4);}
   S.pax=S.pax.filter(g=>g.to!==S.loc);
   for(const g of S.pax.filter(g=>S.day>g.by))lapsePax(g);
   if(S.contract&&S.day>S.contract.by){log(`Colony request expired: ${amt(S.contract.units,G(S.contract.good))} ${G(S.contract.good).name} to ${ST(S.contract.to).name}. They found someone else.`,'bad');S.contract=null;}
@@ -767,7 +842,7 @@ function servicesHTML(st,wires){let h='';const sol=st.sys==='sol',M=v=>usd(v);
 
 /* ---------- trading ---------- */
 function buy(id,q){const o=S.mkt.data[id];if(!o)return;const g=G(id),p=buyAt(S.loc,o.local);q=Math.min(q,o.stock,Math.floor(S.cash/p),Math.floor(freeT()/(g.kg/1000)+1e-9));if(q<=0)return;o.stock-=q;S.cash-=q*p;addCargo(id,q,q*p);log(`Bought ${amt(q,g)} ${g.name} for ${usd(q*p)}.`);save();closeSheet();render();}
-function sell(id,q){const o=S.mkt.data[id];if(!o)return;const g=G(id),p=sellAt(S.loc,o.local,undefined,id);q=Math.min(q,held(id));if(q<=0)return;const basis=removeCargo(id,q);S.cash+=q*p;const pl=q*p-basis;if(pl>0)S.stats.profitSales++;if(ST(S.loc).sys==='star')S.stats.starSales++;if(o.role==='want'&&q*p>=1e6)gainRep(S.loc,Math.min(10,Math.max(2,Math.floor(q*p/4e6))),true);log(`Sold ${amt(q,g)} ${g.name} for ${usd(q*p)} (${pl>=0?'+':'−'}${usd(Math.abs(pl))}).`,pl>=0?'good':'bad');save();closeSheet();render();}
+function sell(id,q){const o=S.mkt.data[id];if(!o)return;const g=G(id),p=sellAt(S.loc,o.local,undefined,id);q=Math.min(q,held(id));if(q<=0)return;const basis=removeCargo(id,q);S.cash+=q*p;const pl=q*p-basis;if(pl>0)S.stats.profitSales++;if(ST(S.loc).sys==='star')S.stats.starSales++;if(o.role==='want'&&q*p>=1e6)gainRep(S.loc,Math.min(10,Math.max(2,Math.floor(q*p/4e6))),true);log(`Sold ${amt(q,g)} ${g.name} for ${usd(q*p)} (${pl>=0?'+':'−'}${usd(Math.abs(pl))}).`,pl>=0?'good':'bad');if(pl>0&&o.ev&&o.ev.up)celebrate('cel-shortage','You sold into a shortage',`${ST(S.loc).name} was short of ${g.name.toLowerCase()}, so you earned ${usd(pl)} on one sale. Watch Trades for ▲ headlines: that is how big fortunes are made.`);save();closeSheet();render();}
 function bestTrades(){
   const m=S.mkt.data,out=[];
   for(const d of STATIONS){if(d.id===S.loc)continue;const p=plan(d.id);if(S.day+p.days>S.total)continue;
@@ -829,7 +904,7 @@ function showEvent(){
 /* ---------- end ---------- */
 function finish(reason){
   settleFleet();for(const c of (S.freight||[]).slice())lapseContract('was not delivered before the mission ended',c);for(const g of (S.pax||[]).slice())lapsePax(g);
-  S.over=true;S.outcome=reason;const score=reason==='lost'?Math.round(savUSD()+fleetValue()):net();
+  S.over=true;S.outcome=reason;hideTip();tipActive=null;TIPS.missions++;if(!TIPS.userSet&&TIPS.missions>=2&&TIPS.mode==='guided')TIPS.mode='light';tipsSave();const score=reason==='lost'?Math.round(savUSD()+fleetValue()):net();
   const prev=bestFor(S.mode==='daily'?S.seed:null,S.total);
   addRecord({seed:S.seed,mode:S.mode,total:S.total,score,date:kstDate(),acts:S.acts.length});
   log(reason==='lost'?'Probe lost. No fork.':`Mission closed. Replication fund ${usd(score)}. Forking.`,reason==='lost'?'bad':'good');save();render();
@@ -840,10 +915,10 @@ function finish(reason){
 }
 
 /* ---------- navigation ---------- */
-function go(screen){ui.screen=screen;ui.page=null;render();if(screen==='market'&&S&&S.event&&!sheetSpec)showEvent();}
+function go(screen){ui.screen=screen;ui.page=null;if(screen!=='market')hideTip();render();if(screen==='market'&&S&&S.event&&!sheetSpec)showEvent();}
 function page(name){ui.from=ui.screen==='page'?ui.from:ui.screen;ui.screen='page';ui.page=name;render();$('#scr-page .body').scrollTop=0;}
 let sheetSpec=null;
-function openSheet(spec){sheetSpec=spec;ui.sheet=spec;drawSheet();}
+function openSheet(spec){hideTip();sheetSpec=spec;ui.sheet=spec;drawSheet();}
 function closeSheet(){sheetSpec=null;ui.sheet=null;$('#scrim').hidden=true;flashMsg='';}
 function refreshSheet(){if(sheetSpec&&sheetSpec.rebuild)sheetSpec=sheetSpec.rebuild();drawSheet();}
 function drawSheet(){
@@ -865,6 +940,7 @@ function render(){
   if(ui.screen==='home')renderHome();else if(ui.screen==='market')renderMarket();else renderPage();
   if(sheetSpec&&sheetSpec.rebuild){sheetSpec=sheetSpec.rebuild();drawSheet();}
   showActIfAny();
+  pumpTips();
 }
 function tickerHTML(){
   const seed='daily-'+kstDate(),m=market(seed,1,'leo'),m2=market(seed,1,'art'),items=[];
@@ -897,7 +973,8 @@ function renderHome(){
 // In-game menu: the market is the mission's root screen, so its corner button opens a menu instead of leaving.
 function openMenu(){
   openSheet({eyebrow:`Day ${Math.min(S.day,S.total)} of ${S.total} · saved after every action`,title:'Menu',
-    body:`<p>Your mission is saved. Going to the main menu does not end it: tap <b>Continue mission</b> there to pick up here.</p>`,
+    body:`<p>Your mission is saved. Going to the main menu does not end it: tap <b>Continue mission</b> there to pick up here.</p><span class="eyebrow">Tips</span><div class="tipmode seg" role="group" aria-label="Tips">${[['guided','Guided'],['light','Light'],['off','Off']].map(([k,l])=>`<button type="button" data-tm="${k}" aria-pressed="${TIPS.mode===k}">${l}</button>`).join('')}</div><p class="small muted">Guided teaches as you go. Light shows only celebrations and reminders. <button class="linkbtn" type="button" id="tip-reset">Reset tips</button></p>`,
+    wire:sh=>{sh.querySelectorAll('[data-tm]').forEach(b=>b.addEventListener('click',()=>{setTipMode(b.dataset.tm);openMenu();}));sh.querySelector('#tip-reset').addEventListener('click',()=>{resetTips();openMenu();});},
     actions:[{label:'Resume',fn:()=>{closeSheet();render();}},{label:'Codex',kind:'ghost',fn:()=>{closeSheet();page('codex');}},{label:'Main menu',kind:'ghost',fn:()=>{closeSheet();go('home');}}]});}
 function renderMarket(){
   const st=ST(S.loc),m=S.mkt.data;
@@ -907,7 +984,7 @@ function renderMarket(){
       <div class="mk-top"><button class="back menubtn" type="button" id="m-home" aria-label="Menu">☰</button><div style="flex:1;min-width:0"><span class="eyebrow">${st.place}</span><h2>${st.name}</h2></div><div class="mk-day"><b>${Math.min(S.day,S.total)}/${S.total}</b><span class="eyebrow">Days</span></div></div>
       <div class="cash">${usd(S.cash)}</div>
       <div class="mk-sub"><span class="rep">${repTier(S.loc)} ${Math.round(repOf(S.loc))}</span><span class="note ${S.debt>0?'':'ok'}">DEBT ${S.debt>0?usd(S.debt):'CLEARED'}</span>${loansUSD()>0?`<span class="note">LOANS ${usd(loansUSD())}</span>`:''}${savUSD()>0?`<span class="note ok">SAVED ${usd(savUSD())}</span>`:''}<span class="muted">${AGENCY_SHORT[st.bloc]} · ${BLOC_NAME[st.bloc].toLowerCase()}</span></div>
-      ${GOODS.filter(g=>m[g.id]&&m[g.id].ev).map(g=>{const v=m[g.id].ev;return `<p class="news ${v.up?'':'dn'}">${v.up?'▲':'▼'} ${v.head}. Price ×${v.m.toFixed(v.m<1?2:1)}${v.to>S.day?`, ${v.to-S.day+1} days left`:', last day'}: ${v.up?'sell here':'buy here'}.</p>`;}).join('')}${S.news?`<p class="news">${S.news.spike?'Colony shortage':'Rival dump'}: ${G(S.news.good).name} ${S.news.spike?'well above':'well below'} its usual range.</p>`:''}
+      ${GOODS.filter(g=>m[g.id]&&m[g.id].ev).map(g=>{const v=m[g.id].ev;return `<p class="news ${v.up?'':'dn'}">${v.up?'▲':'▼'} ${v.head}. Price ×${v.m.toFixed(v.m<1?2:1)}${v.to>S.day?`, ${v.to-S.day+1} days left`:', last day'}: ${v.up?'sell here':'buy here'}.</p>`;}).join('')}${remindersHTML()}${S.news?`<p class="news">${S.news.spike?'Colony shortage':'Rival dump'}: ${G(S.news.good).name} ${S.news.spike?'well above':'well below'} its usual range.</p>`:''}
     </header>
     <div class="body pad" style="padding-block:0 8px">
       <ul class="goods">${GOODS.map(g=>{const o=m[g.id],h=held(g.id);
@@ -1063,6 +1140,7 @@ function codexHTML(){
   const anchor={water:'Early market $500/kg lunar surface, $1,000/kg EML1 (Sowers); launch parity $3,246/kg Falcon 9, $10–100/kg Starship target',metal:'Game assumption: local ISRU cheap, launch-cost parity in orbit',nitro:'Scarce on the Moon; ammonium salts on Ceres. Game assumption',food:'Game assumption: launch cost plus handling',elec:'Game assumption: Earth-made, priced up with distance',leu:'Game assumption; NASA lunar reactor uses low-enriched uranium',pgm:'Platinum $2,153.50/oz on 5 Mar 2026, about $69,000/kg',he3:'$2,500–3,000 per liter; Interlune $20M/kg',samp:'Game assumption: scientific value of extrasolar material'};
   const sol=STATIONS.filter(s=>s.sys==='sol');
   return `<div class="codex" style="display:grid;gap:18px">
+  ${tipsCodexHTML()}
   <div><h3>Story</h3><div style="display:grid;gap:8px">${STORY}</div><p class="small" style="margin-top:8px"><button class="linkbtn" type="button" onclick="showIntro(true)">Replay the boot log</button></p></div>
   <div><h3>Standing and acts</h3><ul>
     <li><b>Colony standing</b> runs 0–100 per station: Unknown, Known (20), Trusted (50), Partner (80). Selling a colony goods it wants earns up to 10 a sale and 16 a day; supply contracts earn 8, colony requests 15, a paid inspection 5. Refusing an inspector costs 8.</li>
