@@ -595,10 +595,19 @@ function routeHelp(dest,p,fq){const out=[];
     if(stops.length)out.push(`<p class="small">Refuel on the way: ${stops.map(s=>`<button class="linkbtn" type="button" data-via="${s.id}">${short(s.name)}</button>`).join(' or ')} is in reach now, and every Solar System station refuels ships.</p>`);}
   if(holdShort)out.push(`<p class="small"><button class="linkbtn" type="button" id="r-jettison">Jettison cargo to make room</button></p>`);
   if(!canMoveSomewhere()){const e=emergencyQuote();
-    out.push(e?`<p class="small warn">Stranded: no fuel you can pay for here.</p><p class="small"><button class="linkbtn" type="button" id="r-sta">Call the STA emergency tanker</button>: ${e.f.label} for ${short(ST(e.dest).name)}, ${usd(e.cost)} added to debt (50% surcharge${e.wait?', 1 day':''}).</p>`
-             :'<p class="small warn">Stranded with no days left to wait for a tanker. End the mission from the Port screen.</p>');}
+    if(e)out.push(`<p class="small warn">Stranded: no fuel you can pay for here.</p><p class="small"><button class="linkbtn" type="button" id="r-sta">Call the STA emergency tanker</button>: ${e.f.label} for ${short(ST(e.dest).name)}, ${usd(e.cost)} added to debt (50% surcharge${e.wait?', 1 day':''}).</p>`);
+    else if(S.day>=S.total)out.push('<p class="small warn">No days left in this mission. End it from the Port screen.</p>');
+    else{const here=Object.keys(S.cargo).filter(id=>id!=='prop'&&id!=='he3'&&S.mkt.data[id]),hop=nearestHop();
+      out.push(`<p class="small warn">Stuck: your hold is too full to carry the fuel for any jump, so not even the STA tanker can help.${here.length?` Sell some cargo here (${here.map(id=>G(id).name.toLowerCase()).join(', ')}) or jettison some.`:' Jettison some cargo to make room.'}</p>`);
+      if(!holdShort&&hop)out.push(`<p class="small"><button class="linkbtn" type="button" id="r-jettison">Jettison cargo to make room</button></p>`);}}
   return out.join('');}
 const CREDIT_LIMIT=150e6;
+const nearestHop=()=>ST(S.loc).sys!=='sol'?null:STATIONS.filter(s=>s.sys==='sol'&&s.id!==S.loc).sort((a,b)=>dv(S.loc,a.id)-dv(S.loc,b.id))[0].id;
+// Lots of a good that fit in the hold while still leaving room to load the fuel for a jump to dest
+function holdRoomLots(dest,perT){if(!dest||isInterstellar(S.loc,dest))return Math.floor(freeT()/perT+1e-9);
+  const f=1-Math.exp(-dv(S.loc,dest)/veP()),k=f/(1-f),prop=held('prop'),needNow=k*(DRY+massT()-prop),qA=Math.floor(freeT()/perT+1e-9);
+  if(needNow+k*qA*perT<=prop+1e-9)return qA;
+  return Math.max(0,Math.floor((S.hold-massT()+prop-needNow)/(perT*(1+k))+1e-9));}
 let DEBT_HALYARD_ONLY=true;   // the commissioning debt is owed to Halyard, which takes payment only at its own stops
 const HALYARD_STOPS=()=>STATIONS.filter(s=>s.sys==='sol'&&s.bloc==='USD');
 const canRepayDebt=()=>!!S&&ST(S.loc).sys==='sol'&&(!DEBT_HALYARD_ONLY||ST(S.loc).bloc==='USD');
@@ -988,19 +997,20 @@ function openTrade(){
     const bp=buyAt(S.loc,o.local),sp=sellAt(S.loc,o.local,undefined,selGood),perT=g.kg/1000,rb=repSellMult(S.loc,selGood)-1;
     const maxBuy=Math.max(0,Math.min(o.stock,Math.floor(S.cash/bp),Math.floor(freeT()/perT+1e-9)));
     const fq=sel?fuelQuote(sel):null,reserve=fq?fq.cost:0;
-    const safeBuy=Math.max(0,Math.min(maxBuy,Math.floor(Math.max(0,S.cash-reserve)/bp)));
+    const fuelDest=sel&&sel!==S.loc?sel:nearestHop(),fitBuy=selGood==='prop'||selGood==='he3'?maxBuy:Math.max(0,Math.min(maxBuy,holdRoomLots(fuelDest,perT)));
+    const safeBuy=Math.max(0,Math.min(fitBuy,Math.floor(Math.max(0,S.cash-reserve)/bp)));
     const sellMax=Math.floor(h+1e-9),mx=Math.max(maxBuy,sellMax);
     const q0=suggestQ!==null?Math.min(suggestQ,mx):(mx?Math.min(mx,1):0);suggestQ=null;
     return {title:g.name,eyebrow:`${st.name} · ${LOT[g.unit]}`,headRight:`<span class="mono" style="font-size:20px">${money(o.local,cur.sym)}</span>`,rebuild:null,
-      body:`<dl class="kv"><dt>Buy price</dt><dd>${usd(bp)}</dd><dt>Sell price</dt><dd>${usd(sp)}</dd>${rb>0?`<dt>Standing bonus</dt><dd class="up">+${Math.round(rb*100)}% · ${repTier(S.loc)}</dd>`:''}<dt>In hold</dt><dd>${qfmt(h)}${c&&c.q?` · avg ${usd(c.cost/c.q)}`:''}</dd><dt>Station stock</dt><dd>${o.stock?qfmt(o.stock):o.sells?'sold out today':'buys only'}</dd><dt>Can buy</dt><dd>${maxBuy}${!o.stock&&o.sells?' · new stock on your next visit':''}${reserve&&safeBuy<maxBuy?` · ${safeBuy} if you keep ${usd(reserve)} for fuel to ${short(ST(sel).name)}`:''}</dd><dt>Mass per lot</dt><dd>${g.kg>=1000?'1 t':g.kg+' kg'}</dd></dl>
+      body:`<dl class="kv"><dt>Buy price</dt><dd>${usd(bp)}</dd><dt>Sell price</dt><dd>${usd(sp)}</dd>${rb>0?`<dt>Standing bonus</dt><dd class="up">+${Math.round(rb*100)}% · ${repTier(S.loc)}</dd>`:''}<dt>In hold</dt><dd>${qfmt(h)}${c&&c.q?` · avg ${usd(c.cost/c.q)}`:''}</dd><dt>Station stock</dt><dd>${o.stock?qfmt(o.stock):o.sells?'sold out today':'buys only'}</dd><dt>Can buy</dt><dd>${maxBuy}${!o.stock&&o.sells?' · new stock on your next visit':''}${fitBuy<maxBuy&&fuelDest?` · ${fitBuy} leaves room for fuel to ${short(ST(fuelDest).name)}`:''}${reserve&&safeBuy<fitBuy?` · ${safeBuy} if you keep ${usd(reserve)} for fuel to ${short(ST(sel).name)}`:''}</dd><dt>Mass per lot</dt><dd>${g.kg>=1000?'1 t':g.kg+' kg'}</dd></dl>
         ${g.restricted?'<p class="small" style="color:#c9b9a8">Export controlled: non-dollar stations may inspect it.</p>':''}${g.perish?'<p class="small" style="color:#c9b9a8">Perishable: loses 3% per travel day.</p>':''}
         <div class="trade-row"><input type="range" id="qty-r" min="0" max="${mx}" value="${q0}" aria-label="Quantity"><input type="number" id="qty" min="0" max="${mx}" value="${q0}" aria-label="Quantity"></div><p class="small mono" id="qty-note"></p>
-        <div class="grid2"><button class="btn ghost" type="button" id="b-max" ${(safeBuy||maxBuy)<1?'disabled':''}>Max (${safeBuy||maxBuy})</button><button class="btn ghost" type="button" id="b-all" ${h<=0?'disabled':''}>All (${qfmt(h)})</button></div>`,
+        <div class="grid2"><button class="btn ghost" type="button" id="b-max" ${(safeBuy||fitBuy)<1?'disabled':''}>Max (${safeBuy||fitBuy})</button><button class="btn ghost" type="button" id="b-all" ${h<=0?'disabled':''}>All (${qfmt(h)})</button></div>`,
       actions:[{label:'Buy',fn:()=>buy(selGood,qv())},{label:'Sell',kind:'warnb',fn:()=>sell(selGood,qv())}],
       wire:()=>{const upd=()=>{const n=qv(),bb=document.querySelectorAll('#sh-acts button');bb[0].disabled=n<1||n>maxBuy;bb[1].disabled=n<1||n>sellMax;
-          const pl=c&&c.q&&n<=h?` · sale P/L ${(sp-c.cost/c.q)*n>=0?'+':'−'}${usd(Math.abs((sp-c.cost/c.q)*n))}`:'';const xf=sel&&sel!==S.loc&&!isInterstellar(S.loc,sel)&&n>0?(()=>{const f=1-Math.exp(-dv(S.loc,sel)/veP());return n*perT*f/(1-f);})():0;$('#qty-note').textContent=`${n} × ${usd(bp)} = ${usd(n*bp)} · +${tons(n*perT)}${pl}${xf>=.05?` · needs +${tons(xf)} fuel for ${short(ST(sel).name)}`:''}`;};
+          const pl=c&&c.q&&n<=h?` · sale P/L ${(sp-c.cost/c.q)*n>=0?'+':'−'}${usd(Math.abs((sp-c.cost/c.q)*n))}`:'';const xf=sel&&sel!==S.loc&&!isInterstellar(S.loc,sel)&&n>0?(()=>{const f=1-Math.exp(-dv(S.loc,sel)/veP());return n*perT*f/(1-f);})():0;$('#qty-note').textContent=`${n} × ${usd(bp)} = ${usd(n*bp)} · +${tons(n*perT)}${pl}${xf>=.05?` · needs +${tons(xf)} fuel for ${short(ST(sel).name)}`:''}${n>fitBuy&&fuelDest?` · ⚠ no room left for fuel to ${short(ST(fuelDest).name)}`:''}`;};
         $('#qty-r').addEventListener('input',e=>{$('#qty').value=e.target.value;upd();});$('#qty').addEventListener('input',e=>{$('#qty-r').value=e.target.value;upd();});
-        $('#b-max').addEventListener('click',()=>buy(selGood,safeBuy||maxBuy));$('#b-all').addEventListener('click',()=>sell(selGood,h));upd();}};};
+        $('#b-max').addEventListener('click',()=>buy(selGood,safeBuy||fitBuy));$('#b-all').addEventListener('click',()=>sell(selGood,h));upd();}};};
   openSheet(build());
 }
 const qv=()=>Math.max(0,Math.floor(+($('#qty')||{}).value||0));
@@ -1020,7 +1030,7 @@ function openMove(){
     const stop=s=>{const isHere=s.id===S.loc,p=isHere?null:plan(s.id);const svc=svcList(s).map(x=>SVC[x]).join(' · ');
       const cost=isHere?'you are here':p.inter?`${p.days}d · ${(p.he3*.1).toFixed(2)} kg He-3`:`${p.days}d · ${tons(p.burn)}`;
       return `<li><button class="stop${s.sys==='star'?' star':''}${isHere?' here':''}${p&&!p.ok?' off':''}" type="button" data-id="${s.id}" ${isHere?'disabled':''}><i></i><span class="nm"><b>${short(s.name)}</b><span>${svc||(s.sys==='star'?s.place.split(' · ')[1]:'')}</span></span><span class="cost">${cost}${p&&p.inter?'':p?`<br>Δv ${p.dv.toFixed(1)}`:''}</span></button></li>`;};
-    const strand=!S.over&&!canMoveSomewhere()?`<p class="small warn" style="margin-bottom:8px">Stranded: no destination is reachable with fuel you can pay for. Open any stop to call the STA emergency tanker.</p>`:'';
+    const strand=!S.over&&!canMoveSomewhere()?`<p class="small warn" style="margin-bottom:8px">${emergencyQuote()?'Stranded: no destination is reachable with fuel you can pay for. Open any stop to call the STA emergency tanker.':'Stuck: your hold is too full to carry fuel for any jump. Sell or jettison cargo (open any stop for the jettison button).'}</p>`:'';
     const list=strand+`<ul class="line"><h4>Solar System · cost is Δv</h4>${STATIONS.filter(s=>s.sys==='sol').map(stop).join('')}<h4>Interstellar · cost is time and He-3</h4>${STATIONS.filter(s=>s.sys==='star').map(stop).join('')}</ul>`;
     return {title:'Move',eyebrow:`Day ${S.day} of ${S.total} · wet mass ${tons(DRY+massT())}`,rebuild:null,
       headRight:`<div class="toggle" role="group" aria-label="View"><button type="button" data-v="list" aria-pressed="${ui.moveView==='list'}">List</button><button type="button" data-v="chart" aria-pressed="${ui.moveView==='chart'}">Chart</button></div>`,
@@ -1049,7 +1059,7 @@ function openRoute(dest){
         ${p.ok?'':`<p class="small warn">Cannot jump: ${p.reasons.join('; ')}.</p>`}${flashMsg?`<p class="small warn">${flashMsg}</p>`:''}
         ${p.ok?'':routeHelp(dest,p,fq)}
         ${rows?`<table><thead><tr><th>Cargo</th><th class="n">Here</th><th class="n">There</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table><p class="small" style="color:#c9b9a8">Per lot in dollars after spreads, before fuel. Margin compares there with here, or with what you paid for cargo you hold. Prices are today's; they drift a little by arrival. Trades shows profit after fuel.</p>`:''}`,
-      actions:acts,wire:sh=>{$('#r-back').addEventListener('click',()=>{flashMsg='';openMove();});sh.querySelectorAll('[data-via]').forEach(b=>b.addEventListener('click',()=>openRoute(b.dataset.via)));const j=sh.querySelector('#r-jettison');if(j)j.addEventListener('click',()=>{jettisonFor(plan(dest).loadProp);openRoute(dest);});const t=sh.querySelector('#r-sta');if(t)t.addEventListener('click',emergencyFuel);}};};
+      actions:acts,wire:sh=>{$('#r-back').addEventListener('click',()=>{flashMsg='';openMove();});sh.querySelectorAll('[data-via]').forEach(b=>b.addEventListener('click',()=>openRoute(b.dataset.via)));const j=sh.querySelector('#r-jettison');if(j)j.addEventListener('click',()=>{const pd=plan(dest);jettisonFor(pd.inter||!pd.loadProp?plan(nearestHop()).loadProp:pd.loadProp);openRoute(dest);});const t=sh.querySelector('#r-sta');if(t)t.addEventListener('click',emergencyFuel);}};};
   flashMsg='';openSheet(build());
 }
 
