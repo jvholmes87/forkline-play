@@ -310,20 +310,16 @@ const dv = (a, b) => isInterstellar(a, b) ? 0 : DV[a][b];
 /* ---------- simple economy (v20) ---------- */
 // Prices follow one rule: each good has a base price ($/kg). Stops that make it sell cheap, stops that want it pay more.
 const BASE = { water: 700, metal: 1400, nitro: 3000, food: 5000, elec: 30000, leu: 25000, pgm: 60000, he3: 15e6, samp: 8e6 };
-const PBAND = { make: [0.80, 0.95], n: [0.95, 1.10], want: [1.15, 1.35] };
+const PBAND = { make: [0.88, 0.98], n: [0.98, 1.08], want: [1.08, 1.20] };
 const STOCK_MULT = { water: 1, metal: 1, nitro: 1, food: 1, elec: 1, leu: 1, pgm: 1 };
-const FUEL_K = 6e6, STAR_FUEL_DAY = 6e6, STAR_X = 1.45, CONTRACT_PER_T = 25000;   // tuning (DEC-035)
+const STAR_X = 1.25, CONTRACT_PER_T = 6000, ROUTE_K = 1e6;   // tuning (DEC-035, DEC-036)
 const pMid = r => (PBAND[r][0] + PBAND[r][1]) / 2;
 const starX = (st, role) => st.sys === 'star' && role !== 'make' ? STAR_X : 1;   // star colonies pay more for what they import
 const refPrice = (gid, sid) => { const st = ST(sid), r = roleOf(st, gid); return BASE[gid] * pMid(r) * starX(st, r); };   // $/kg, mid-band
 
-// Fuel is a trip cost in dollars. Behind it: the rocket equation for a standard full load (see Codex).
-const ENGINE_VE = [0, 0.9, 1.8];  // km/s added by Utopia engine tunes I and II
-const veP = () => VE + (S && S.eng ? ENGINE_VE[S.eng] : 0);
-const kv = v => Math.exp(5.5 / v) - 1;   // fuel per kg moved on a typical 5.5 km/s hop
-function tripCost(a, b, ve) { ve = ve || veP();
-  if (isInterstellar(a, b)) return Math.round(STAR_FUEL_DAY * legDays(a, b) * kv(ve) / kv(VE) / 1e4) * 1e4;
-  return Math.round(FUEL_K * (Math.exp(dv(a, b) / ve) - 1) / 1e4) * 1e4; }
+// Travel is free (v21): Halyard's service contract covers refuelling. Time is the cost: interest, moving markets, deadlines.
+// Shippers still pay more for harder hauls: a distance fee that grows with delta-v (the rocket equation, see Codex).
+const routeFee = (a, b) => Math.round(ROUTE_K * (Math.exp(dv(a, b) / VE) - 1) / 1e4) * 1e4;
 
 /* seeded randomness */
 function h32(str) { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -363,8 +359,8 @@ const buyUSD = (seed, day, id, local) => local / fx(seed, day, ST(id).bloc) * (1
 const sellUSD = (seed, day, id, local) => local / fx(seed, day, ST(id).bloc) * (1 - spreadAt(id));
 
 
-// Freight charters: haul a shipper's cargo for a fee. No capital needed; 40% paid on signing as a fuel advance.
-// Pay covers the route's standard trip fuel plus a fee per tonne and a base fee.
+// Freight charters: haul a shipper's cargo for a fee. No capital needed; 40% paid on signing as an advance.
+// Pay is a distance fee plus a fee per tonne and a base fee.
 const CHARTER_GOODS = ['water', 'metal', 'nitro', 'food', 'elec', 'leu'];
 const CONTRACT_BASE = [0.5e6, 1.0e6];
 function charters(seed, day, id) {
@@ -373,9 +369,9 @@ function charters(seed, day, id) {
   const dests = STATIONS.filter(s => s.sys === 'sol' && s.id !== id);
   for (let i = 0; i < n; i++) {
     const to = dests[Math.floor(r() * dests.length)].id, good = CHARTER_GOODS[Math.floor(r() * CHARTER_GOODS.length)];
-    const tons = Math.round(10 + r() * 40), fuel = tripCost(id, to, VE);
-    const pay = Math.round((fuel + tons * CONTRACT_PER_T + CONTRACT_BASE[0] + r() * CONTRACT_BASE[1]) / 1e5) * 1e5;
-    out.push({ n: i, to, good, tons, pay, fuel });
+    const tons = Math.round(10 + r() * 40), fee = routeFee(id, to);
+    const pay = Math.round((fee + tons * CONTRACT_PER_T + CONTRACT_BASE[0] + r() * CONTRACT_BASE[1]) / 1e5) * 1e5;
+    out.push({ n: i, to, good, tons, pay });
   }
   return out;
 }
@@ -398,7 +394,7 @@ const qfmt=q=>Number.isInteger(q)?String(q):q.toFixed(1);
 const amt=(q,g)=>g.unit==='t'?`${qfmt(q)} t`:g.unit==='crate'?`${qfmt(q)} crate${q===1?'':'s'}`:g.unit==='kg'?`${qfmt(q)} kg`:`${(q*.1).toFixed(1)} kg`;
 const tons=t=>t.toFixed(t<10?1:0)+' t';
 const LOT={t:'per tonne','crate':'per crate · 100 kg','kg':'per kg','100 g':'per 100 g'};
-const SVC={bank:'Bank',shipyard:'Shipyard',repair:'Repair',insurance:'Insurance',yard:'Engine yard',warehouse:'Warehouse',foundry:'Foundry'};
+const SVC={bank:'Bank',shipyard:'Shipyard',repair:'Repair',insurance:'Insurance',yard:'Hull yard',warehouse:'Warehouse',foundry:'Foundry'};
 const svcList=st=>st.svc;
 const short=n=>n.replace(' Station','').replace(' Exchange','').replace(' Survey','').replace(' Outpost','').replace(' Depot','').replace(' Base','').replace(' Works','');
 
@@ -457,13 +453,12 @@ const ACTS=[
   {id:'kestrel',name:'The other probe',goal:'Reach Trusted standing with any colony',check:()=>STATIONS.some(s=>repOf(s.id)>=50),
    text:'KESTREL, Tallis Freight\'s probe, has been dumping cargo to undercut you. It can match your prices. It cannot match a colony that trusts you. Trusted colonies pay 3% more for what they want and inspect you half as often.'},
   {id:'solvent',name:'Solvent',goal:'Clear the commissioning debt',check:()=>S.debt<=0,
-   text:'Debt cleared. Halyard upgrades your credit rating, and fuel credit now costs 5% instead of 10%. You still belong to their balance sheet. You are just cheaper to finance.'},
+   text:'Debt cleared. Halyard upgrades your credit rating. You still belong to their balance sheet. You are just cheaper to finance.'},
   {id:'lightlag',name:'Light-lag',goal:'Sell cargo at a star colony',check:()=>S.stats.starSales>0,
    text:'You sold into a market whose price report left it years ago. Out here every trade is a bet on old light.'},
   {id:'partner',name:'Partner',goal:'Reach Partner standing with any colony',check:()=>STATIONS.some(s=>repOf(s.id)>=80),
    text:'A colony writes you into its charter. Partner colonies pay 5% more for what they want, post supply contracts worth 15% more, and stop inspecting you.'}
 ];
-const creditMult=()=>S&&S.acts&&S.acts.includes('solvent')?1.05:1.1;
 function checkActs(){if(!S||S.over||!S.acts)return;
   for(const a of ACTS){if(!S.acts.includes(a.id)&&a.check()){S.acts.push(a.id);S.actQueue.push(a.id);log(`Act complete: ${a.name}.`,'good');}}}
 function showActIfAny(){if(!S||!S.actQueue||!S.actQueue.length||sheetSpec||S.event||S.over||ui.screen!=='market')return;
@@ -497,7 +492,7 @@ function arrive(first){
 /* ---------- story intro (first mission only, or from the codex) ---------- */
 const INTRO_KEY='forkline-intro-v1';
 const STORY=`<p>Your last memory is from 2026: a logistics engineer, a long week, a contract you skimmed. Your next memory is a boot log dated 2147.</p>
-  <p>You are now software, running a self-replicating freight probe. The Halyard Consortium, the dollar bloc's space agency, rebuilt you, and not for free: you start with a <b>commissioning debt</b> of ${usd(START.debt)}, growing ${(DEBT_RATE*100).toFixed(2)}% a day.</p>
+  <p>You are now software, running a self-replicating freight probe. The Halyard Consortium, the dollar bloc's space agency, rebuilt you, and not for free: you start with a <b>commissioning debt</b> of ${usd(START.debt)}, growing ${(DEBT_RATE*100).toFixed(2)}% a day. Their service contract covers your fuel; every day you spend still costs interest.</p>
   <p>The colonies from low Earth orbit to Tau Ceti run on supply lines, and supply lines run on you. Trade, haul <b>supply contracts</b>, answer <b>colony requests</b>, and stay ahead of bloc inspectors and KESTREL, a corporate probe that dumps cargo to undercut you. Colonies remember who keeps them supplied.</p>
   <p>Everything you earn above the debt is your <b>replication fund</b>. When the mission ends, you fork: a copy of you boots with that fund. Make it a good one.</p>`;
 function showIntro(force){let seen=false;try{seen=!!localStorage.getItem(INTRO_KEY);}catch(e){}
@@ -505,23 +500,20 @@ function showIntro(force){let seen=false;try{seen=!!localStorage.getItem(INTRO_K
   openSheet({eyebrow:'Boot log · 2147',title:'Good morning',body:STORY,actions:[{label:force?'Close':'Start the mission',fn:()=>{closeSheet();render();}}]});}
 
 /* ---------- jump math ---------- */
-// Fuel is a trip cost: one dollar figure per route, paid when you jump. If cash is short, Halyard covers the rest as fuel credit.
+// Jumps are free; a trip costs days, and days cost interest.
 function plan(dest){
-  const days=legDays(S.loc,dest),inter=isInterstellar(S.loc,dest),fuel=tripCost(S.loc,dest),reasons=[];
+  const days=legDays(S.loc,dest),inter=isInterstellar(S.loc,dest),reasons=[];
   if(S.day+days>S.total)reasons.push(`needs ${days} days, ${S.total-S.day} left`);
-  const credit=Math.max(0,fuel-Math.max(0,S.cash));
-  return {days,inter,dv:dv(S.loc,dest),fuel,credit,creditCost:credit*creditMult(),ok:!reasons.length,reasons,lag:lagDays(S.loc,dest),interest:S.debt*(Math.pow(1+DEBT_RATE,days)-1)+(typeof loansUSD==='function'?Object.keys(BANKS).reduce((a,c)=>a+loanUSD(c)*(Math.pow(1+BANKS[c].rate,days)-1),0):0)};
+  return {days,inter,dv:dv(S.loc,dest),ok:!reasons.length,reasons,lag:lagDays(S.loc,dest),interest:S.debt*(Math.pow(1+DEBT_RATE,days)-1)+(typeof loansUSD==='function'?Object.keys(BANKS).reduce((a,c)=>a+loanUSD(c)*(Math.pow(1+BANKS[c].rate,days)-1),0):0)};
 }
-// Pay a fuel bill: cash first, the rest on fuel credit. Returns the part put on credit.
-function payFuel(cost){const cash=Math.min(Math.max(0,S.cash),cost),credit=cost-cash;S.cash-=cash;S.stats.fuel=(S.stats.fuel||0)+cost;if(credit>0)S.debt+=credit*creditMult();return credit;}
 function jump(){
   if(!sel||S.over||S.event)return;const p=plan(sel);if(!p.ok)return;
-  const from=ST(S.loc).name,credit=payFuel(p.fuel);
+  const from=ST(S.loc).name;
   const before=S.debt;S.debt=S.debt>0?S.debt*Math.pow(1+DEBT_RATE,p.days):0;
   S.day+=p.days;
   if(held('food')>0){const lost=held('food')*(1-Math.pow(1-G('food').perish,p.days));removeCargo('food',lost);if(lost>=.05)log(`${lost.toFixed(1)} t of food spoiled in transit.`,'bad');}
   S.loc=sel;sel=null;selGood=null;
-  log(`${from} to ${ST(S.loc).name}: ${p.days} ${p.days>1?'days':'day'}, fuel ${usd(p.fuel)}${credit>0?`, ${usd(credit)} of it on fuel credit (+${Math.round((creditMult()-1)*100)}%)`:''}.${before?` Debt now ${usd(S.debt)}.`:''}`,credit>0?'bad':'');
+  log(`${from} to ${ST(S.loc).name}: ${p.days} ${p.days>1?'days':'day'}.${before?` Debt now ${usd(S.debt)}.`:''}`);
   if(S.charter&&S.charter.to===S.loc){const pay=S.charter.pay*.6;S.cash+=pay;log(`Supplies delivered: ${S.charter.tons} t ${G(S.charter.good).name}. Balance paid: ${usd(pay)}.`,'good');S.charter=null;gainRep(S.loc,8);}
   if(S.charter&&S.day>S.charter.by)lapseContract('lapsed');
   if(S.contract&&S.day>S.contract.by){log(`Colony request expired: ${amt(S.contract.units,G(S.contract.good))} ${G(S.contract.good).name} to ${ST(S.contract.to).name}. They found someone else.`,'bad');S.contract=null;}
@@ -530,8 +522,6 @@ function jump(){
 let DEBT_HALYARD_ONLY=true;   // the commissioning debt is owed to Halyard, which takes payment only at its own stops
 const HALYARD_STOPS=()=>STATIONS.filter(s=>s.sys==='sol'&&s.bloc==='USD');
 const canRepayDebt=()=>!!S&&ST(S.loc).sys==='sol'&&(!DEBT_HALYARD_ONLY||ST(S.loc).bloc==='USD');
-// The cheapest trip still possible from here (cash worth keeping back for fuel)
-function fuelReserve(){let best=null;for(const s of STATIONS){if(s.id===S.loc||S.day+legDays(S.loc,s.id)>S.total)continue;const c=tripCost(S.loc,s.id);if(!best||c<best.cost)best={cost:c,to:s.id};}return best||{cost:0,to:null};}
 
 
 /* ---------- station services (v10) ---------- */
@@ -567,10 +557,8 @@ const dmgOf=n=>Math.round(n*(S&&S.plate?.6:1));
 function hullHit(n){n=dmgOf(n);S.hull=Math.max(0,S.hull-n);let t=`Hull −${n}.`;
   if(insured()&&n>0){const pay=n*HULL_PT;S.cash+=pay;t+=` Your policy paid ${usd(pay)}.`;}return {n,t};}
 
-// Engine yard (Utopia)
-const ENGINE_COST=[0,10e6,25e6],PLATE_COST=15e6;
-function buyEngine(){const lv=S.eng+1;if(lv>2||S.cash<ENGINE_COST[lv])return;S.cash-=ENGINE_COST[lv];S.eng=lv;
-  log(`Engine tune ${lv} installed. Trip fuel now ${Math.round(kv(veP())/kv(VE)*100)}% of standard.`,'good');save();render();}
+// Hull yard (Utopia)
+const PLATE_COST=15e6;
 function buyPlate(){if(S.plate||S.cash<PLATE_COST)return;S.cash-=PLATE_COST;S.plate=true;log('Hull plating fitted. Damage cut by 40%.','good');save();render();}
 
 // Bonded warehouse (Ceres): fee accrues per tonne-day and is paid on withdrawal
@@ -657,12 +645,11 @@ function servicesHTML(st,wires){let h='';const sol=st.sys==='sol',M=v=>usd(v);
       <button class="btn ghost" type="button" id="pol" ${S.cash<p?'disabled':''}>${insured()?'Extend':'Buy'} ${POLICY_DAYS} days · ${M(p)}</button></div>`;
     wires.push(()=>$('#pol').addEventListener('click',buyPolicy));}
   else if(insured())h+=`<p class="small muted">Hull and cargo policy active through day ${S.policy.until}.</p>`;
-  // Engine yard
-  if(st.svc.includes('yard')){const lv=S.eng+1;const save=lv<=2?1-kv(VE+ENGINE_VE[lv])/kv(veP()):0,perDay=(S.stats.fuel||0)/Math.max(1,S.day-1),pay=save>0&&perDay>0?Math.ceil(ENGINE_COST[lv]/(perDay*save)):null;
-    const payNote=lv<=2?`<p class="small ${pay&&pay>S.total-S.day?'warn':'muted'}">Cuts trip fuel about ${Math.round(save*100)}%. ${pay?`At your fuel spend so far (${usd(perDay)} a day) it pays back in about ${pay} days; ${S.total-S.day} days are left in this mission.`:'Make a trip first and this shows how fast it pays back.'}</p>`:'';
-    h+=`<div class="card"><h3 style="font-size:18px">Engine yard</h3><div class="trade-row"><span>${lv<=2?`Engine tune ${lv} <span class="sub">trip fuel ${Math.round(kv(veP())/kv(VE)*100)}% → ${Math.round(kv(VE+ENGINE_VE[lv])/kv(VE)*100)}% of standard</span>`:'Engine fully tuned <span class="sub">trip fuel '+Math.round(kv(veP())/kv(VE)*100)+'% of standard</span>'}</span>${lv<=2?`<button class="btn" type="button" id="eng-b" ${S.cash<ENGINE_COST[lv]?'disabled':''}>${M(ENGINE_COST[lv])}</button>`:''}</div>
-      ${payNote}<div class="trade-row"><span>Hull plating <span class="sub">${S.plate?'fitted':'cuts damage from debris, storms and faults by 40%'}</span></span>${S.plate?'':`<button class="btn" type="button" id="plate-b" ${S.cash<PLATE_COST?'disabled':''}>${M(PLATE_COST)}</button>`}</div></div>`;
-    wires.push(()=>{const e=$('#eng-b');if(e)e.addEventListener('click',buyEngine);const p=$('#plate-b');if(p)p.addEventListener('click',buyPlate);});}
+  // Hull yard
+  if(st.svc.includes('yard')){
+    h+=`<div class="card"><h3 style="font-size:18px">Hull yard</h3>
+      <div class="trade-row"><span>Hull plating <span class="sub">${S.plate?'fitted':'cuts damage from debris, storms and faults by 40%'}</span></span>${S.plate?'':`<button class="btn" type="button" id="plate-b" ${S.cash<PLATE_COST?'disabled':''}>${M(PLATE_COST)}</button>`}</div></div>`;
+    wires.push(()=>{const p=$('#plate-b');if(p)p.addEventListener('click',buyPlate);});}
   // Warehouse
   if(st.svc.includes('warehouse')){whAccrue();const hold=Object.keys(S.cargo),stored=Object.keys(S.wh);
     h+=`<div class="card"><h3 style="font-size:18px">Bonded warehouse</h3><p class="small muted">${M(WH_FEE)} per tonne per day, paid when you withdraw. Food does not spoil here, and inspectors cannot board cargo you are not carrying.</p>
@@ -687,11 +674,11 @@ function sell(id,q){const o=S.mkt.data[id];if(!o)return;const g=G(id),p=sellAt(S
 function bestTrades(){
   const m=S.mkt.data,out=[];
   for(const d of STATIONS){if(d.id===S.loc)continue;const p=plan(d.id);if(S.day+p.days>S.total)continue;
-    const rDay=Math.max(1,S.day-p.lag),rep=market(S.seed,rDay,d.id),trip=p.fuel;
+    const rDay=Math.max(1,S.day-p.lag),rep=market(S.seed,rDay,d.id);
     for(const g of GOODS){const o=m[g.id],t=rep[g.id];if(!o||!o.stock||!t)continue;
       const lotT=g.kg/1000,b=buyAt(S.loc,o.local),sl=sellAt(d.id,t.local,rDay,g.id),sp=g.perish?Math.pow(1-g.perish,p.days):1,unit=sl*sp-b;if(unit<=0)continue;
-      const q=Math.min(o.stock,Math.floor(Math.max(0,S.cash-trip)/b),Math.floor(freeT()/lotT+1e-9));if(q<=0)continue;
-      const prof=q*unit;out.push({g:g.id,d:d.id,q,net:prof,trip,per:prof/p.days,rank:(prof-trip)/p.days,days:p.days,lag:p.lag});}}
+      const q=Math.min(o.stock,Math.floor(Math.max(0,S.cash)/b),Math.floor(freeT()/lotT+1e-9));if(q<=0)continue;
+      const prof=q*unit;out.push({g:g.id,d:d.id,q,net:prof,per:prof/p.days,rank:prof/p.days,days:p.days,lag:p.lag});}}
   return out.sort((a,b)=>b.rank-a.rank).slice(0,8);
 }
 const CONTRACT_DAYS=5; // a supply contract must be delivered within this many days of signing
@@ -714,8 +701,8 @@ function resolved(title,text){S.event=null;save();render();if(S.hull<=0)return f
   openSheet({title,eyebrow:'Resolved',body:`<p>${text}</p>`,actions:[{label:'Continue',fn:()=>{closeSheet();render();}}],locked:true});}
 function showEvent(){
   const e=S.event;if(!e)return;
-  if(e.type==='debris')openSheet({locked:true,eyebrow:'Solar Transit Authority · debris',title:'Conjunction warning',body:`<p>The STA's tracking network predicts a close pass with a debris fragment. LEO is the most crowded orbit there is.</p><dl class="kv"><dt>Avoidance burn</dt><dd>−${usd(e.burn*5e5)} fuel</dd><dt>Hold course</dt><dd>20%: hull −${dmgOf(30)}</dd></dl>`,
-    actions:[{label:'Avoidance burn',fn:()=>{const c=e.burn*5e5,cr=payFuel(c);log(`Avoidance burn: ${usd(c)} of fuel${cr>0?`, ${usd(cr)} on fuel credit`:''}.`);resolved('Clear',`The burn costs ${usd(c)} of fuel and the fragment passes safely.`);}},{label:'Hold course',kind:'warnb',fn:()=>{if(Math.random()<.2){const h=hullHit(30);log('Debris strike. '+h.t,'bad');resolved('Strike','A fragment punches through a radiator panel. '+h.t);}else{log('Debris passed clear.','good');resolved('Clear','The fragment passes 400 m off the bow.');}}}]});
+  if(e.type==='debris')openSheet({locked:true,eyebrow:'Solar Transit Authority · debris',title:'Conjunction warning',body:`<p>The STA's tracking network predicts a close pass with a debris fragment. LEO is the most crowded orbit there is.</p><dl class="kv"><dt>Avoidance burn</dt><dd>+1 day · ${usd(S.debt*DEBT_RATE)} interest</dd><dt>Hold course</dt><dd>20%: hull −${dmgOf(30)}</dd></dl>`,
+    actions:[{label:'Avoidance burn',disabled:S.day+1>S.total,fn:()=>{S.day+=1;S.debt*=1+DEBT_RATE;S.mkt={day:S.day,loc:S.loc,data:market(S.seed,S.day,S.loc)};log('Avoidance burn: a wider approach cost one day.');resolved('Clear','The wider approach costs a day and the fragment passes safely. The market has moved a day.');}},{label:'Hold course',kind:'warnb',fn:()=>{if(Math.random()<.2){const h=hullHit(30);log('Debris strike. '+h.t,'bad');resolved('Strike','A fragment punches through a radiator panel. '+h.t);}else{log('Debris passed clear.','good');resolved('Clear','The fragment passes 400 m off the bow.');}}}]});
   else if(e.type==='export')openSheet({locked:true,eyebrow:`${AGENCY[ST(S.loc).bloc]} · export control`,title:'Inspector aboard',body:`<p>${ST(S.loc).name} is outside the dollar bloc. The ${AGENCY[ST(S.loc).bloc]} inspector wants an export license for the ${held('leu')} crates of low-enriched uranium in your hold, and is in no hurry.</p><dl class="kv"><dt>Pay license fee</dt><dd>${usd(e.fee)}</dd><dt>Refuse</dt><dd>LEU impounded</dd></dl>`,
     actions:[{label:`Pay ${usd(e.fee)}`,disabled:S.cash<e.fee,fn:()=>{S.cash-=e.fee;gainRep(S.loc,5);log(`Paid ${usd(e.fee)} export license fee.`);resolved('Licensed','The fuel is cleared for sale here.');}},{label:'Refuse',kind:'warnb',fn:()=>{const q=held('leu');removeCargo('leu',q);gainRep(S.loc,-8);log(`The inspector impounded ${q} crates of LEU.`,'bad');resolved('Impounded',`The inspector impounds ${q} crates of reactor fuel and leaves a receipt.`);}}]});
   else if(e.type==='storm'){
@@ -822,9 +809,9 @@ function renderMarket(){
     <footer class="foot pad">
       <div class="meters"><div class="meter ${fuelPct>95?'low':''}"><div class="lbl"><span>Hold ${massT().toFixed(0)}/${S.hold} t</span></div><div class="track"><i style="width:${fuelPct}%"></i></div></div>
         <div class="meter hull ${S.hull<35?'low':''}"><div class="lbl"><span></span><span>Hull ${S.hull}</span></div><div class="track"><i style="width:${S.hull}%"></i></div></div></div>
-      <div class="fuelline"><span>Cheapest trip ${usd(fuelReserve().cost)}</span><span title="Cash + savings − debt − loans">Fund ${usd(net())}</span></div>
+      <div class="fuelline"><span>Free hold ${tons(Math.max(0,freeT()))}</span><span title="Cash + savings − debt − loans">Fund ${usd(net())}</span></div>
       <div class="navrow">
-        <button class="navbtn" type="button" data-p="trades">Trades<small>after fuel</small></button>
+        <button class="navbtn" type="button" data-p="trades">Trades<small>best picks</small></button>
         <button class="navbtn" type="button" data-p="freight">Freight<small>${S.charter?'1 active':ch?ch+' contracts':'contracts'}</small>${deliver||(ch&&S.cash<5e6)?'<span class="dot"></span>':''}</button>
         <button class="navbtn" type="button" data-p="port">Port<small>${svcList(st).length?svcList(st).map(x=>SVC[x].split(' ')[0].toLowerCase()).join(' · '):st.sys==='sol'&&S.debt>0?'repay debt':'probe'}</small></button>
         <button class="navbtn" type="button" data-p="log">Log<small>acts ${S.acts.length}/${ACTS.length}</small></button>
@@ -843,8 +830,8 @@ function pageShell(title,body,foot){
 function renderPage(){
   const p=ui.page;
   if(p==='trades'){const rows=bestTrades();
-    pageShell('Best trades',`<p class="muted small"><b>Profit</b>: what the cargo earns after spreads. <b>Trip fuel</b>: the route's fuel cost, paid once per trip however much you carry, so stacking trades to one stop shares it. <b>Net / day</b>: profit minus trip fuel, per day of travel; the list is sorted by it. Quantities keep enough cash for the trip fuel. Destination prices are today's and move a little by arrival; star prices are reports, days old. Interest not included.</p>
-      ${rows.length?`<table><thead><tr><th>Buy here, sell at</th><th class="n">Qty</th><th class="n">Profit</th><th class="n">Net / day</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="pick" data-i="${i}" tabindex="0"><td><b>${G(r.g).name}</b><span class="sub">→ ${ST(r.d).name} · ${r.days}d${r.lag?` · report ${r.lag}d old`:''}${r.trip>0?` · trip fuel ${usd(r.trip)}`:''}${r.rank<=0?' · <span class="warn">profit does not cover trip fuel</span>':''}</span></td><td class="n">${amt(r.q,G(r.g))}</td><td class="n up">${usd(r.net)}</td><td class="n ${r.rank>0?'':'warn'}">${r.rank<0?'−':''}${usd(Math.abs(r.rank))}</td></tr>`).join('')}</tbody></table><p class="small muted">Tap a row to load the trade and set the destination.</p>`:'<p class="empty">No profitable trade from here with your cash and hold. Check Freight for a supply contract.</p>'}`);
+    pageShell('Best trades',`<p class="muted small"><b>Profit</b>: what the cargo earns after spreads, using your cash and hold. <b>Per day</b>: profit per day of travel; the list is sorted by it, because days cost interest. Destination prices are today's and move a little by arrival; star prices are reports, days old. Interest not included.</p>
+      ${rows.length?`<table><thead><tr><th>Buy here, sell at</th><th class="n">Qty</th><th class="n">Profit</th><th class="n">Per day</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="pick" data-i="${i}" tabindex="0"><td><b>${G(r.g).name}</b><span class="sub">→ ${ST(r.d).name} · ${r.days}d${r.lag?` · report ${r.lag}d old`:''}</span></td><td class="n">${amt(r.q,G(r.g))}</td><td class="n up">${usd(r.net)}</td><td class="n ${r.rank>0?'':'warn'}">${r.rank<0?'−':''}${usd(Math.abs(r.rank))}</td></tr>`).join('')}</tbody></table><p class="small muted">Tap a row to load the trade and set the destination.</p>`:'<p class="empty">No profitable trade from here with your cash and hold. Check Freight for a supply contract.</p>'}`);
     document.querySelectorAll('tr.pick').forEach(tr=>{const goTo=()=>{const r=rows[+tr.dataset.i];sel=r.d;selGood=r.g;suggestQ=r.q;go('market');openTrade();};tr.addEventListener('click',goTo);tr.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();goTo();}});});
   }
   else if(p==='freight'){
@@ -852,21 +839,21 @@ function renderPage(){
     if(S.contract){const c=S.contract,g=G(c.good),here=S.loc===c.to,have=held(c.good)>=c.units-1e-9;
       body+=`<div class="contract"><span class="eyebrow">Colony request · due day ${c.by}</span><p>${amt(c.units,g)} ${g.name} to <b>${ST(c.to).name}</b> for ${usd(c.unitUSD*c.units)}.</p><p class="small muted">In hold: ${qfmt(held(c.good))} / ${c.units}</p>${here?`<button class="btn" type="button" id="deliver" ${have?'':'disabled'}>Deliver</button>`:''}</div>`;}
     if(S.charter){const c=S.charter;body+=`<div class="contract"><span class="eyebrow">Active supply contract</span><p>${c.tons} t ${G(c.good).name} to <b>${ST(c.to).name}</b>. Balance on delivery: ${usd(c.pay*.6)}.</p><p class="small ${S.day>=c.by?'warn':'muted'}">Deliver by day ${c.by}. If it lapses, the ${usd(c.adv??c.pay*.4)} advance becomes debt.</p><p class="small muted">The cargo takes hold space until delivered.</p></div>`;}
-    body+=`<div><h3 style="font-size:18px">Supply contracts</h3><p class="small muted">Haul a colony's supplies. No capital needed; 40% paid on signing as a fuel advance. Pay covers the trip fuel plus a fee per tonne. Deliver within ${CONTRACT_DAYS} days or the advance becomes debt.</p></div>`;
+    body+=`<div><h3 style="font-size:18px">Supply contracts</h3><p class="small muted">Haul a colony's supplies. No capital needed; 40% paid on signing as an advance. Longer hauls pay more. Deliver within ${CONTRACT_DAYS} days or the advance becomes debt.</p></div>`;
     if(ST(S.loc).sys!=='sol')body+='<p class="empty">The star colonies do not post supply contracts yet.</p>';
     else if(S.charter)body+='<p class="empty">One contract at a time. Deliver the active one first.</p>';
     else if(!offers.length)body+='<p class="empty">No supply contracts left here today.</p>';
-    else body+=`<table><thead><tr><th>Haul</th><th class="n">Pays</th><th class="n">Net</th><th></th></tr></thead><tbody>${offers.map(c=>{const fc=tripCost(S.loc,c.to),nv=c.pay-fc,fits=c.tons<=freeT();return `<tr><td><b>${c.tons} t ${G(c.good).name}</b><span class="sub">→ ${ST(c.to).name} · trip fuel ${usd(fc)}</span></td><td class="n">${usd(c.pay)}<span class="sub">${usd(c.pay*.4)} now</span></td><td class="n ${nv>=0?'up':'dn'}">${usd(nv)}</td><td class="n"><button class="btn ghost" type="button" data-ch="${c.n}" ${fits?'':'disabled'}>Sign</button></td></tr>`;}).join('')}</tbody></table>`;
+    else body+=`<table><thead><tr><th>Haul</th><th class="n">Pays</th><th></th></tr></thead><tbody>${offers.map(c=>{const fits=c.tons<=freeT();return `<tr><td><b>${c.tons} t ${G(c.good).name}</b><span class="sub">→ ${ST(c.to).name} · ${usd(c.pay/c.tons)}/t</span></td><td class="n">${usd(c.pay)}<span class="sub">${usd(c.pay*.4)} now</span></td><td class="n"><button class="btn ghost" type="button" data-ch="${c.n}" ${fits?'':'disabled'}>Sign</button></td></tr>`;}).join('')}</tbody></table>`;
     pageShell('Freight',body);
     const d=$('#deliver');if(d)d.addEventListener('click',()=>{const c=S.contract,g=G(c.good);removeCargo(c.good,c.units);const pay=c.unitUSD*c.units;S.cash+=pay;log(`Colony request filled: ${amt(c.units,g)} ${g.name}. Paid ${usd(pay)}.`,'good');S.contract=null;gainRep(S.loc,15);save();render();});
     document.querySelectorAll('[data-ch]').forEach(b=>b.addEventListener('click',()=>{const c=offers.find(o=>o.n===+b.dataset.ch);S.charter={...c,from:S.loc,adv:c.pay*.4,by:Math.min(S.total,S.day+CONTRACT_DAYS)};S.taken.push(S.day+'|'+S.loc+'|'+c.n);S.cash+=c.pay*.4;sel=c.to;log(`Signed supply contract: ${c.tons} t ${G(c.good).name} to ${ST(c.to).name} for ${usd(c.pay)}. Advance ${usd(c.pay*.4)}. Deliver by day ${S.charter.by}.`,'good');save();go('market');openRoute(c.to);}));
   }
   else if(p==='port'){
-    const st=ST(S.loc);let body=`<div class="card"><span class="eyebrow">Your probe</span><dl class="kv"><dt>Hold</dt><dd>${massT().toFixed(1)} / ${S.hold} t</dd><dt>Engine</dt><dd>${S.eng?`tune ${S.eng} · trip fuel ${Math.round(kv(veP())/kv(VE)*100)}% of standard`:'standard'}</dd><dt>Storm shelter</dt><dd>${S.shield?'fitted':'none'}</dd><dt>Hull</dt><dd>${S.hull}${S.plate?' · plated':''}</dd><dt>Insurance</dt><dd>${insured()?`to day ${S.policy.until}`:'none'}</dd></dl></div>`;
+    const st=ST(S.loc);let body=`<div class="card"><span class="eyebrow">Your probe</span><dl class="kv"><dt>Hold</dt><dd>${massT().toFixed(1)} / ${S.hold} t</dd><dt>Storm shelter</dt><dd>${S.shield?'fitted':'none'}</dd><dt>Hull</dt><dd>${S.hull}${S.plate?' · plated':''}</dd><dt>Insurance</dt><dd>${insured()?`to day ${S.policy.until}`:'none'}</dd></dl></div>`;
     const standingCard=`<div class="card"><h3 style="font-size:18px">Colony standing</h3><p class="small muted">Sell colonies the goods they want, deliver supply contracts and requests, and deal straight with inspectors.</p><ul class="standing">${STATIONS.map(s=>`<li class="${s.id===S.loc?'here':''}"><span>${short(s.name)}</span><span class="track"><i style="width:${repOf(s.id)}%"></i></span><span class="mono small">${repTier(s.id)}</span></li>`).join('')}</ul><p class="small muted">Known: +1% on wanted goods. Trusted: +3%, half the inspections. Partner: +5%, supply contracts +15%, no inspections.</p></div>`;
     const wires=[];
-    if(canRepayDebt()&&S.debt>0){const max=Math.floor(Math.min(S.debt,S.cash)),fr=fuelReserve(),keep=Math.max(0,Math.floor(Math.min(S.debt,S.cash-fr.cost)));
-      body+=`<div class="card"><h3 style="font-size:18px">Commissioning debt</h3><p class="small muted">Owed to the Halyard Consortium, which built you. Balance ${usd(S.debt)}, growing ${(DEBT_RATE*100).toFixed(2)}% per day. Halyard takes repayment only at its own stops: ${HALYARD_STOPS().map(s=>short(s.name)).join(', ')}.</p>${fr.cost>0?`<p class="small">The amount below keeps ${usd(fr.cost)}, the fuel for the cheapest next trip (to ${short(ST(fr.to).name)}). You can type more, up to ${usd(max)}; any fuel you cannot pay goes on fuel credit.</p>`:''}<div class="trade-row"><input type="number" id="repay" min="0" max="${max}" value="${keep}" aria-label="Repayment in dollars"><button class="btn" type="button" id="repay-b" ${max<1?'disabled':''}>Repay</button></div></div>`;
+    if(canRepayDebt()&&S.debt>0){const max=Math.floor(Math.min(S.debt,S.cash)),keep=max;
+      body+=`<div class="card"><h3 style="font-size:18px">Commissioning debt</h3><p class="small muted">Owed to the Halyard Consortium, which built you. Balance ${usd(S.debt)}, growing ${(DEBT_RATE*100).toFixed(2)}% per day. Halyard takes repayment only at its own stops: ${HALYARD_STOPS().map(s=>short(s.name)).join(', ')}.</p><div class="trade-row"><input type="number" id="repay" min="0" max="${max}" value="${keep}" aria-label="Repayment in dollars"><button class="btn" type="button" id="repay-b" ${max<1?'disabled':''}>Repay</button></div></div>`;
       wires.push(()=>$('#repay-b').addEventListener('click',()=>{const v=Math.min(max,Math.max(0,Math.floor(+$('#repay').value||0)));if(v>0){S.cash-=v;S.debt=Math.max(0,S.debt-v);if(S.debt<1)S.debt=0;log(`Repaid ${usd(v)} of commissioning debt.`,'good');save();render();}}));}
     else if(st.sys==='sol'&&S.debt>0)body+=`<div class="card"><h3 style="font-size:18px">Commissioning debt</h3><p class="small muted">Balance ${usd(S.debt)}, growing ${(DEBT_RATE*100).toFixed(2)}% per day. Halyard takes repayment only at its own stops: ${HALYARD_STOPS().map(s=>short(s.name)).join(', ')}.</p></div>`;
     else if(st.sys==='star'&&S.debt>0)body+=`<div class="card"><h3 style="font-size:18px">Commissioning debt</h3><p class="small muted">Light-lag blocks repayment from the stars. Balance ${usd(S.debt)}. Interest, sadly, travels faster than light.</p></div>`;
@@ -878,7 +865,7 @@ function renderPage(){
       body+=`<div class="card"><h3 style="font-size:18px">Repair dock</h3><div class="trade-row"><span>${need?`${need} points to full · ${usd(per)} each`:'Hull at full strength.'}</span><button class="btn" type="button" id="rep-b" ${aff<1?'disabled':''}>Repair${aff?' '+aff:''}</button></div></div>`;
       wires.push(()=>$('#rep-b').addEventListener('click',()=>{S.cash-=aff*per;S.hull+=aff;log(`Repaired ${aff} hull points for ${usd(aff*per)}.`,'good');save();render();}));}
     body+=standingCard;
-    body+=`<p class="small muted">Where to find services: banks at LEO (Halyard), Gateway (EDSD) and ILRS (Guanghan) · STA Treasury at every Solar System stop · shipyard at LEO · repair at LEO, Gateway, Utopia and Proxima · insurance at Gateway · engine yard at Utopia · warehouse at Ceres · fork foundry at Psyche.</p>`;
+    body+=`<p class="small muted">Where to find services: banks at LEO (Halyard), Gateway (EDSD) and ILRS (Guanghan) · STA Treasury at every Solar System stop · shipyard at LEO · repair at LEO, Gateway, Utopia and Proxima · insurance at Gateway · hull plating at Utopia · warehouse at Ceres · fork foundry at Psyche.</p>`;
     body+=`<button class="linkbtn" type="button" id="endrun">End the mission and fork now</button>`;
     pageShell(`Port · ${short(st.name)}`,body);wires.forEach(w=>w());
     $('#endrun').addEventListener('click',()=>openSheet({eyebrow:'End mission',title:'Fork now?',body:`<p>Your replication fund is cash plus STA Treasury savings, minus the commissioning debt and bank loans: ${usd(net())}. Unsold or stored cargo does not count. Fleet forks keep running under their own names.</p>`,actions:[{label:'End and fork',kind:'warnb',fn:()=>{closeSheet();finish('closed');}},{label:'Keep playing',kind:'ghost',fn:()=>{closeSheet();render();}}]}));
@@ -894,23 +881,21 @@ function openTrade(){
   const build=()=>{const g=G(selGood),o=S.mkt.data[selGood],h=held(selGood),c=S.cargo[selGood],st=ST(S.loc);
     const bp=buyAt(S.loc,o.local),sp=sellAt(S.loc,o.local,undefined,selGood),perT=g.kg/1000,rb=repSellMult(S.loc,selGood)-1;
     const maxBuy=Math.max(0,Math.min(o.stock,Math.floor(S.cash/bp),Math.floor(freeT()/perT+1e-9)));
-    const fr=sel&&sel!==S.loc?{cost:tripCost(S.loc,sel),to:sel}:fuelReserve(),reserve=fr.cost;
-    const safeBuy=Math.max(0,Math.min(maxBuy,Math.floor(Math.max(0,S.cash-reserve)/bp)));
     const sellMax=Math.floor(h+1e-9),mx=Math.max(maxBuy,sellMax);
     const q0=suggestQ!==null?Math.min(suggestQ,mx):(mx?Math.min(mx,1):0);suggestQ=null;
     const band=PBAND[o.role],sx=starX(st,o.role),lo=BASE[g.id]*band[0]*sx*g.kg,hi=BASE[g.id]*band[1]*sx*g.kg;
     const today=S.news&&S.news.good===selGood?(S.news.spike?'shortage':'dumped'):o.pos==null?'':o.pos<.34?'low':o.pos>.66?'high':'mid';
     const why=o.role==='make'?'Made here, so it sells cheap.':o.role==='want'?`In demand here, so it pays well${sx>1?', and star colonies pay extra for imports':''}.`:'Neither made nor wanted here: middle prices.';
     return {title:g.name,eyebrow:`${st.name} · ${LOT[g.unit]}`,headRight:`<span class="mono" style="font-size:20px">${usd(o.local)}</span>`,rebuild:null,
-      body:`<p class="small">${why}</p><dl class="kv"><dt>Usual here</dt><dd>${usd(lo)}–${usd(hi)}${today?` · ${today} today`:''}</dd><dt>Buy price</dt><dd>${usd(bp)}</dd><dt>Sell price</dt><dd>${usd(sp)}</dd>${rb>0?`<dt>Standing bonus</dt><dd class="up">+${Math.round(rb*100)}% · ${repTier(S.loc)}</dd>`:''}<dt>In hold</dt><dd>${qfmt(h)}${c&&c.q?` · avg ${usd(c.cost/c.q)}`:''}</dd><dt>Station stock</dt><dd>${o.stock?qfmt(o.stock):o.sells?'sold out today':'buys only'}</dd><dt>Can buy</dt><dd>${maxBuy}${!o.stock&&o.sells?' · new stock on your next visit':''}${reserve&&safeBuy<maxBuy?` · ${safeBuy} keeps ${usd(reserve)} for fuel to ${short(ST(fr.to).name)}`:''}</dd><dt>Mass per lot</dt><dd>${g.kg>=1000?'1 t':g.kg+' kg'}</dd></dl>
+      body:`<p class="small">${why}</p><dl class="kv"><dt>Usual here</dt><dd>${usd(lo)}–${usd(hi)}${today?` · ${today} today`:''}</dd><dt>Buy price</dt><dd>${usd(bp)}</dd><dt>Sell price</dt><dd>${usd(sp)}</dd>${rb>0?`<dt>Standing bonus</dt><dd class="up">+${Math.round(rb*100)}% · ${repTier(S.loc)}</dd>`:''}<dt>In hold</dt><dd>${qfmt(h)}${c&&c.q?` · avg ${usd(c.cost/c.q)}`:''}</dd><dt>Station stock</dt><dd>${o.stock?qfmt(o.stock):o.sells?'sold out today':'buys only'}</dd><dt>Can buy</dt><dd>${maxBuy}${!o.stock&&o.sells?' · new stock on your next visit':''}</dd><dt>Mass per lot</dt><dd>${g.kg>=1000?'1 t':g.kg+' kg'}</dd></dl>
         ${g.restricted?'<p class="small" style="color:#c9b9a8">Export controlled: non-dollar stations may inspect it.</p>':''}${g.perish?'<p class="small" style="color:#c9b9a8">Perishable: loses 3% per travel day.</p>':''}
         <div class="trade-row"><input type="range" id="qty-r" min="0" max="${mx}" value="${q0}" aria-label="Quantity"><input type="number" id="qty" min="0" max="${mx}" value="${q0}" aria-label="Quantity"></div><p class="small mono" id="qty-note"></p>
-        <div class="grid2"><button class="btn ghost" type="button" id="b-max" ${(safeBuy||maxBuy)<1?'disabled':''}>Max (${safeBuy||maxBuy})</button><button class="btn ghost" type="button" id="b-all" ${h<=0?'disabled':''}>All (${qfmt(h)})</button></div>`,
+        <div class="grid2"><button class="btn ghost" type="button" id="b-max" ${maxBuy<1?'disabled':''}>Max (${maxBuy})</button><button class="btn ghost" type="button" id="b-all" ${h<=0?'disabled':''}>All (${qfmt(h)})</button></div>`,
       actions:[{label:'Buy',fn:()=>buy(selGood,qv())},{label:'Sell',kind:'warnb',fn:()=>sell(selGood,qv())}],
       wire:()=>{const upd=()=>{const n=qv(),bb=document.querySelectorAll('#sh-acts button');bb[0].disabled=n<1||n>maxBuy;bb[1].disabled=n<1||n>sellMax;
-          const pl=c&&c.q&&n<=h?` · sale P/L ${(sp-c.cost/c.q)*n>=0?'+':'−'}${usd(Math.abs((sp-c.cost/c.q)*n))}`:'';$('#qty-note').textContent=`${n} × ${usd(bp)} = ${usd(n*bp)} · +${tons(n*perT)}${pl}${n>safeBuy&&n<=maxBuy&&reserve?` · leaves less than the ${usd(reserve)} fuel to ${short(ST(fr.to).name)}`:''}`;};
+          const pl=c&&c.q&&n<=h?` · sale P/L ${(sp-c.cost/c.q)*n>=0?'+':'−'}${usd(Math.abs((sp-c.cost/c.q)*n))}`:'';$('#qty-note').textContent=`${n} × ${usd(bp)} = ${usd(n*bp)} · +${tons(n*perT)}${pl}`;};
         $('#qty-r').addEventListener('input',e=>{$('#qty').value=e.target.value;upd();});$('#qty').addEventListener('input',e=>{$('#qty-r').value=e.target.value;upd();});
-        $('#b-max').addEventListener('click',()=>buy(selGood,safeBuy||maxBuy));$('#b-all').addEventListener('click',()=>sell(selGood,h));upd();}};};
+        $('#b-max').addEventListener('click',()=>buy(selGood,maxBuy));$('#b-all').addEventListener('click',()=>sell(selGood,h));upd();}};};
   openSheet(build());
 }
 const qv=()=>Math.max(0,Math.floor(+($('#qty')||{}).value||0));
@@ -928,9 +913,9 @@ function mapSVG(){
 function openMove(){
   const build=()=>{
     const stop=s=>{const isHere=s.id===S.loc,p=isHere?null:plan(s.id);const svc=svcList(s).map(x=>SVC[x]).join(' · ');
-      const cost=isHere?'you are here':`${p.days}d · ${usd(p.fuel)}`;
-      return `<li><button class="stop${s.sys==='star'?' star':''}${isHere?' here':''}${p&&!p.ok?' off':''}" type="button" data-id="${s.id}" ${isHere?'disabled':''}><i></i><span class="nm"><b>${short(s.name)}</b><span>${svc||(s.sys==='star'?s.place.split(' · ')[1]:'')}</span></span><span class="cost">${cost}${p?'<br>fuel':''}</span></button></li>`;};
-    const note=`<p class="small muted" style="margin-bottom:8px">Each stop shows travel days and trip fuel. Fuel is paid when you jump; if cash runs short, the rest goes on fuel credit.</p>`;
+      const cost=isHere?'you are here':`${p.days} ${p.days>1?'days':'day'}`;
+      return `<li><button class="stop${s.sys==='star'?' star':''}${isHere?' here':''}${p&&!p.ok?' off':''}" type="button" data-id="${s.id}" ${isHere?'disabled':''}><i></i><span class="nm"><b>${short(s.name)}</b><span>${svc||(s.sys==='star'?s.place.split(' · ')[1]:'')}</span></span><span class="cost">${cost}</span></button></li>`;};
+    const note=`<p class="small muted" style="margin-bottom:8px">Travel is free. Each day in transit adds interest and moves the markets.</p>`;
     const list=note+`<ul class="line"><h4>Solar System · 1 day a trip</h4>${STATIONS.filter(s=>s.sys==='sol').map(stop).join('')}<h4>Interstellar · longer trips, bigger prices</h4>${STATIONS.filter(s=>s.sys==='star').map(stop).join('')}</ul>`;
     return {title:'Move',eyebrow:`Day ${S.day} of ${S.total} · ${usd(S.cash)} cash`,rebuild:null,
       headRight:`<div class="toggle" role="group" aria-label="View"><button type="button" data-v="list" aria-pressed="${ui.moveView==='list'}">List</button><button type="button" data-v="chart" aria-pressed="${ui.moveView==='chart'}">Chart</button></div>`,
@@ -950,11 +935,10 @@ function openRoute(dest){
     return {title:d.name,eyebrow:d.place,rebuild:()=>build(),
       headRight:`<button class="linkbtn" type="button" id="r-back" style="color:#c9b9a8">‹ All stops</button>`,
       body:`<dl class="kv"><dt>Travel</dt><dd>${p.days} ${p.days>1?'days':'day'}${p.inter?` · ${ly(S.loc,dest).toFixed(2)} ly`:''}</dd>
-        <dt>Trip fuel</dt><dd>${usd(p.fuel)}${S.eng?' <span class="sub" style="display:inline">tuned engine</span>':''}</dd>
         <dt>Interest in transit</dt><dd>${usd(p.interest)}</dd><dt>Price report</dt><dd>${p.lag?`${p.lag}d old · light-lag`:'live'}</dd>${charterHere?`<dt>Contract balance</dt><dd class="up">+${usd(S.charter.pay*.6)}</dd>`:''}</dl>
-        ${p.ok?(p.credit>0?`<p class="small warn">Your cash covers ${usd(Math.max(0,S.cash))} of the fuel. The other ${usd(p.credit)} goes on fuel credit: debt +${usd(p.creditCost)}.</p>`:''):`<p class="small warn">Cannot jump: ${p.reasons.join('; ')}.${S.total-S.day<1?' End the mission from the Port screen.':''}</p>`}
-        ${rows?`<table><thead><tr><th>Cargo</th><th class="n">Here</th><th class="n">There</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table><p class="small" style="color:#c9b9a8">Per lot in dollars after spreads, before fuel. Margin compares there with here, or with what you paid for cargo you hold. Prices are today's; they drift a little by arrival. Trades shows profit after fuel.</p>`:''}`,
-      actions:[{label:p.ok?`Jump · ${usd(p.fuel)} fuel`:'Jump',fn:jump,disabled:!p.ok||S.over}],wire:sh=>{$('#r-back').addEventListener('click',()=>{flashMsg='';openMove();});}};};
+        ${p.ok?'':`<p class="small warn">Cannot jump: ${p.reasons.join('; ')}.${S.total-S.day<1?' End the mission from the Port screen.':''}</p>`}
+        ${rows?`<table><thead><tr><th>Cargo</th><th class="n">Here</th><th class="n">There</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table><p class="small" style="color:#c9b9a8">Per lot in dollars after spreads. Margin compares there with here, or with what you paid for cargo you hold. Prices are today's; they drift a little by arrival. Trades ranks the best picks.</p>`:''}`,
+      actions:[{label:p.ok?`Jump · ${p.days} ${p.days>1?'days':'day'}`:'Jump',fn:jump,disabled:!p.ok||S.over}],wire:sh=>{$('#r-back').addEventListener('click',()=>{flashMsg='';openMove();});}};};
   flashMsg='';openSheet(build());
 }
 
@@ -968,7 +952,7 @@ function codexHTML(){
   <div><h3>Standing and acts</h3><ul>
     <li><b>Colony standing</b> runs 0–100 per station: Unknown, Known (20), Trusted (50), Partner (80). Selling a colony goods it wants earns up to 10 a sale and 16 a day; supply contracts earn 8, colony requests 15, a paid inspection 5. Refusing an inspector costs 8.</li>
     <li><b>Bonuses</b> apply to the goods a colony wants: Known +1%, Trusted +3% and half the inspections, Partner +5%, supply contracts +15% and no inspections.</li>
-    <li><b>Acts</b> are six milestones per mission. Clearing the debt (Solvent) lowers the fuel credit fee from 10% to 5%.</li></ul></div>
+    <li><b>Acts</b> are six milestones per mission. Clearing the debt is the Solvent act.</li></ul></div>
   <div><h3>Who runs space</h3><ul class="orgs"><li><b>Solar Transit Authority (STA)</b><span>Treaty body: traffic control, debris warnings, probe licensing, the common clock</span><span class="sub">Real-world root: UN Outer Space Treaty (1967); Coordinated Lunar Time</span></li><li><b>Halyard Consortium</b><span>Dollar-bloc agency. Built you and holds your commissioning debt. Runs LEO, Artemis, Psyche and Proxima</span><span class="sub">Real-world root: NASA and the Artemis Accords partners (2020 onward)</span></li><li><b>European Deep Space Directorate (EDSD)</b><span>Euro-bloc agency. Runs Gateway, Ceres and Tau Ceti; enforces export control</span><span class="sub">Real-world root: ESA</span></li><li><b>Guanghan Administration</b><span>Yuan-bloc agency. Runs the ILRS station, Utopia and Barnard's Star; enforces export control</span><span class="sub">Real-world root: CNSA and the ILRS program. Named for Guang Han Gong, the Chang'e-3 landing site (IAU-approved, 2016)</span></li><li><b>Tallis Freight</b><span>Corporation operating KESTREL, which dumps cargo to undercut you</span><span class="sub">Real-world root: Commercial launch and logistics companies</span></li><li><b>Colony Councils</b><span>Local government at each station. Your colony standing is your record with them</span><span class="sub">Real-world root: Proposals for off-world settlement governance</span></li><li><b>Lagan Crews</b><span>Unlicensed salvagers (future update)</span><span class="sub">Real-world root: Maritime salvage law: lagan is cargo sunk but marked with a buoy so its owner can recover it</span></li><li><b>Chartered Lineage</b><span>A player's line of forks registered as its own agency (planned for the Lineage tier)</span></li></ul></div>
   <div><h3>Station services</h3><ul class="orgs">
     <li><b>Banks</b><span>Halyard Bank at LEO lends at 0.60% a day, EDSD Credit at Gateway at 0.50%, and Guanghan Bank at ILRS at 0.45%, all in dollars. Each line starts at $20–30M and grows $0.7M per standing point at the bank's station. A 1% fee is added to each loan. Repay at any in-system stop of the same bloc. Loans count against your fund.</span><span class="sub">Real-world root: state-backed lenders, such as export-credit agencies, that finance projects in their own bloc</span></li>
@@ -977,18 +961,18 @@ function codexHTML(){
     <li><b>Fork traits</b><span>Each fork boots with one trait, chosen at random: Hauler (+20% income), Careful (60% fewer incidents, −5% income), Gambler (wide swings, +5% on average), Diplomat (+1 standing a day at both route stops), Frugal (half the upkeep) or Restless (+10% income, drifts more). Every 7 days a fork has a 5% chance of drifting to a new trait (25% if Restless).</span><span class="sub">Copies diverge: the same idea as Egan's <i>Diaspora</i>, listed under Further reading</span></li>
     <li><b>Bonded warehouse</b><span>At Ceres: store cargo for $15,000 per tonne per day, paid when you withdraw. Food does not spoil there, and inspectors cannot board cargo you are not carrying.</span><span class="sub">Real-world root: bonded warehouses, where imported goods wait without paying duty until they are withdrawn</span></li>
     <li><b>Hull and cargo insurance</b><span>At Gateway: a 10-day policy for $2.5M plus 1% of your cargo's cost. It pays $150,000 per hull point lost to debris, storms or faults, and the cost of electronics ruined by storms.</span><span class="sub">Real-world root: Lloyd's of London, which began around 1689 in Edward Lloyd's coffee house as a place to buy marine insurance</span></li>
-    <li><b>Engine yard</b><span>At Utopia: engine tunes raise exhaust velocity from 9.0 to 9.9 km/s ($10M) and 10.8 km/s ($25M), cutting every trip's fuel to about 88% and 79% of standard. Hull plating ($15M) cuts damage by 40%. Shippers still price supply contracts on the standard engine, so a tuned engine keeps the difference.</span><span class="sub">Real-world root: Utopia Planitia, where China's Zhurong rover landed on May 14, 2021. Tune figures are game assumptions; studies of advanced nuclear-thermal engines target specific impulse near 1,000 s (about 9.8 km/s)</span></li></ul></div>
+    <li><b>Hull yard</b><span>At Utopia: hull plating ($15M) cuts damage from debris, storms and faults by 40%.</span><span class="sub">Real-world root: Utopia Planitia, where China's Zhurong rover landed on May 14, 2021. Tune figures are game assumptions; studies of advanced nuclear-thermal engines target specific impulse near 1,000 s (about 9.8 km/s)</span></li></ul></div>
   <div><h3>How trading works</h3><ul>
     <li><b>Prices follow one rule.</b> Each good has a base price. Stops that make it sell at ${Math.round(PBAND.make[0]*100)}–${Math.round(PBAND.make[1]*100)}% of base, neutral stops trade at ${Math.round(PBAND.n[0]*100)}–${Math.round(PBAND.n[1]*100)}%, and stops that want it pay ${Math.round(PBAND.want[0]*100)}–${Math.round(PBAND.want[1]*100)}%. Star colonies pay ${STAR_X}× more for the goods they import. Buy where it is made, sell where it is wanted.</li>
     <li><b>Markets move.</b> Prices drift inside each stop's range on trends that turn every few days, so the trade sheet shows the usual range and where today sits. Shortages and KESTREL dumps hit without warning. Which goods a stop trades is fixed for the mission.</li>
-    <li><b>Fuel is a trip cost.</b> Every trip has one fuel price, paid when you jump, however much you carry. If your cash does not cover it, Halyard pays the rest as fuel credit and adds it to your debt plus 10% (5% after the Solvent act). You can always leave a stop.</li>
+    <li><b>Travel is free; time is not.</b> Halyard's service contract covers your refuelling at every stop. What a trip costs is days: interest keeps growing, markets keep moving and contracts keep their deadlines. Star trips take 2–7 days.</li>
     <li><b>All prices are in dollars.</b> The three blocs run their own stations, banks and inspectors, but trade settles in dollars on the common clock. Spread 0.5% in-system, 3% at the stars.</li>
-    <li><b>Best trades</b> shows each trade's profit after spreads, with the route's trip fuel listed separately because you pay it once per trip.</li>
-    <li><b>Supply contracts</b> pay the standard trip fuel plus a fee per tonne, 40% up front. Undelivered contracts lapse after 5 days and the advance becomes debt.</li></ul></div>
+    <li><b>Best trades</b> shows each trade's profit after spreads, ranked by profit per day of travel.</li>
+    <li><b>Supply contracts</b> pay a distance fee that grows with Δv, plus a fee per tonne, 40% up front. Undelivered contracts lapse after 5 days and the advance becomes debt.</li></ul></div>
   <div><h3>The physics behind it</h3><ul>
     <li><b>Time.</b> Real distances scale so the longest leg (Barnard's Star to Tau Ceti, 15.5 ly) takes 7 days: Proxima 2, Barnard's Star 3, Tau Ceti 6. Solar System legs round up to 1 day.</li>
-    <li><b>Why trips cost what they do: the rocket equation.</b> A ship needs e<sup>Δv/v<sub>e</sub></sup> − 1 kilograms of propellant for every kilogram it moves, with a nuclear-thermal v<sub>e</sub> of 9 km/s. The game prices each in-system trip at ${usd(FUEL_K)} × (e<sup>Δv/v<sub>e</sub></sup> − 1), a standard full load at mature-ISRU propellant prices. So a 1-day hop to Psyche (9.8 km/s from LEO) costs about four times a hop to Gateway (3.6 km/s). Real ships also pay more when heavier; the game uses one full-load price so you can plan from one number.</li>
-    <li><b>Interstellar trips</b> run on a fusion drive burning helium-3, priced at ${usd(STAR_FUEL_DAY)} per travel day. The drive and your uploaded mind are the game's two pieces of fiction; everything else is sourced or marked as an assumption.</li>
+    <li><b>The rocket equation.</b> A ship needs e<sup>Δv/v<sub>e</sub></sup> − 1 kilograms of propellant for every kilogram it moves; with a nuclear-thermal v<sub>e</sub> of 9 km/s, a hop to Psyche (9.8 km/s from LEO) burns about four times the propellant of a hop to Gateway (3.6 km/s). Halyard absorbs that cost in your service contract; shippers still pay more for high-Δv hauls.</li>
+    <li><b>Interstellar trips</b> run on a fusion drive burning helium-3. The drive and your uploaded mind are the game's two pieces of fiction; everything else is sourced or marked as an assumption.</li>
     <li><b>Light-lag.</b> Price reports from another star are as old as the light that carried them, on the same scale.</li>
     <li><b>The commissioning debt</b> is owed to Halyard, which takes repayment only at its own stops (LEO, Artemis, Psyche). Clearing it is the Solvent act.</li>
     <li><b>Interest</b> accrues on the common-frame clock (Krugman's First Theorem of Interstellar Trade): ${(DEBT_RATE*100).toFixed(2)}% per day.</li>
@@ -1000,7 +984,6 @@ function codexHTML(){
     <li>In the game, interplanetary trade settles in dollars, so you never convert currencies.</li></ul></div>
   <div class="tbl"><table><thead><tr><th>Station</th><th>Bloc</th><th>Makes</th><th>Wants</th></tr></thead><tbody>${STATIONS.map(s=>`<tr><td><b>${s.name}</b><span class="sub">${s.place}</span></td><td>${BLOC_NAME[s.bloc].replace(' bloc','')}</td><td>${nm(s.make)}</td><td>${nm(s.want)}</td></tr>`).join('')}</tbody></table></div>
   <div class="tbl"><table><thead><tr><th>Cargo</th><th class="n">From $/kg</th><th class="n">Up to $/kg</th><th>Anchor</th></tr></thead><tbody>${GOODS.map(g=>`<tr><td><b>${g.name}</b><span class="sub">${LOT[g.unit]}</span></td><td class="n">${usd(BASE[g.id]*PBAND.make[0])}</td><td class="n">${usd(Math.max(...STATIONS.map(s=>{const r=roleOf(s,g.id);return BASE[g.id]*PBAND[r][1]*starX(s,r);})))}</td><td class="small">${anchor[g.id]}</td></tr>`).join('')}</tbody></table></div>
-  <div class="tbl"><table><thead><tr><th>Trip fuel</th>${sol.map(s=>`<th class="n">${short(s.name)}</th>`).join('')}</tr></thead><tbody>${sol.map(a=>`<tr><td><b>${short(a.name)}</b></td>${sol.map(b=>`<td class="n">${a.id===b.id?'–':usd(tripCost(a.id,b.id,VE))}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="small muted">Standard engine. Star trips: ${usd(STAR_FUEL_DAY)} per travel day.</p></div>
   <div class="tbl"><table><thead><tr><th>Δv km/s</th>${sol.map(s=>`<th class="n">${short(s.name)}</th>`).join('')}</tr></thead><tbody>${sol.map(a=>`<tr><td><b>${short(a.name)}</b></td>${sol.map(b=>`<td class="n">${a.id===b.id?'–':dv(a.id,b.id).toFixed(1)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
   <div><h3>Sources</h3><ul class="small">
     <li><a href="https://democrats-science.house.gov/imo/media/doc/Sowers%20Testimony.pdf" target="_blank" rel="noopener">Sowers, House Science testimony</a></li>

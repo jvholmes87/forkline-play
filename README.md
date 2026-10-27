@@ -5,7 +5,7 @@ A hard-science space trading game. You are an uploaded mind running a self-repli
 **Play:** https://jvholmes87.github.io/forkline-play/
 
 - Works on phone and desktop browsers; progress saves in your browser.
-- This is a pre-release playtest build (version 20). Scores may reset between builds.
+- This is a pre-release playtest build (version 21). Scores may reset between builds.
 - Found a problem? Tell Jason directly, with a screenshot if you can.
 
 The page is excluded from search engines until launch.
