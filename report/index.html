@@ -71,10 +71,10 @@ legend+*{clear:both}
 .scale input:checked~.num{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
 .scale input:focus-visible~.num{outline:3px solid var(--amber);outline-offset:2px}
 .ends{display:flex;justify-content:space-between;font-size:15px;color:var(--ink);margin-top:4px}
-textarea,input[type=text],input[type=number]{width:100%;background:var(--deep);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px}
+textarea,input[type=text],input[type=number],input[type=email]{width:100%;background:var(--deep);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px}
 textarea{min-height:70px;resize:vertical}
 ::placeholder{color:#aeb9ca;opacity:1}
-textarea,input[type=text],input[type=number]{border-width:1.5px;border-color:#5a7299}
+textarea,input[type=text],input[type=number],input[type=email]{border-width:1.5px;border-color:#5a7299}
 .err{color:#ff8a7a;font-size:16px;font-weight:700}
 .ok{color:var(--good)}
 .progress{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}.progress i{display:block;height:100%;background:var(--amber);width:0;transition:width .2s}
@@ -95,7 +95,7 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
   <!-- 1. Welcome -->
   <section class="step" id="s-welcome">
     <p>Thanks for testing Forkline! Your answers help us make the game fun and easy to learn. It takes about 5 minutes.</p>
-    <p class="small muted">You won't be asked for your name, email or where you live. You'll make up a space callsign instead.</p>
+    <p class="small muted">The report doesn't ask for your name, email or where you live. You'll make up a space callsign instead.</p>
     <p class="small">If your feedback makes it into the game, your callsign can go in the in-game credits.</p>
     <div class="card">
       <label for="code"><b>Tester code</b></label>
@@ -181,6 +181,18 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
     <span class="badge">Report received</span>
     <h2>Thanks, <span id="done-cs"></span>!</h2>
     <p>Your report is in. You just helped build a space game. That's real game-tester work.</p>
+    <div class="card" id="crew" hidden>
+      <h2 style="font-size:22px">Join the crew list <span class="muted" style="font-size:16px;text-transform:none">(optional, 18+)</span></h2>
+      <p class="small">Get occasional updates from the developer: new builds, playtests and launch news. Your report has already been sent and stays anonymous; this list is kept separately.</p>
+      <label for="crew-name"><b>First name or nickname</b> <span class="muted small">(optional)</span></label>
+      <input type="text" id="crew-name" maxlength="60" autocomplete="given-name" style="margin:6px 0 12px">
+      <label for="crew-email"><b>Email</b></label>
+      <input type="email" id="crew-email" maxlength="254" autocomplete="email" inputmode="email" style="margin:6px 0 10px">
+      <label class="opt"><input type="checkbox" id="crew-ok"> I'm 18 or older, and I'd like Forkline and Songtan Labs updates by email. I can unsubscribe at any time.</label>
+      <p class="err" id="crew-err" hidden></p>
+      <button class="btn" type="button" id="crew-go" style="margin-top:8px">Add me</button>
+      <p class="ok" id="crew-done" hidden>You're on the list. Thanks for being part of the crew.</p>
+    </div>
     <a class="btn" href="../" style="display:grid;place-items:center;text-decoration:none">Back to the game</a>
     <button class="btn ghost" type="button" id="again">Send another report</button>
   </section>
@@ -189,7 +201,8 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
     <summary>Privacy, in plain words</summary>
     <ul class="small">
       <li>Reports need a tester code, which keeps out spam and bots. We ask for an age group, a made-up callsign, which quest you played, your device type and your answers. Nothing else.</li>
-      <li>No names, emails, photos or locations. Please don't type them in answers.</li>
+      <li>Reports never ask for names, emails, photos or locations. Please don't type them in answers.</li>
+      <li>Adults (18+) can choose to join the crew list after sending a report. We keep the email, and a first name if you give one, separately from your report, and use it only for Forkline and Songtan Labs updates. It isn't sold or shared. It's kept until you unsubscribe or ask to be removed (DM @jasonvonholmes on X). Under-18s never see this option.</li>
       <li>Under 14, a parent or guardian must say OK first.</li>
       <li>Reports are stored in Seoul (Supabase) and kept for up to 12 months, then deleted. They aren't sold or shared, and they're never used for ads.</li>
       <li>The server may log your network address for a short time to keep the service running. We don't store it with your report.</li>
@@ -205,6 +218,7 @@ const BUILD = (new URLSearchParams(location.search).get('b') || 'v25').replace(/
 const API = 'https://oaemgwclfilzlycxxccg.supabase.co/rest/v1/tester_reports';
 const KEY = 'sb_publishable_OwdSfAEhMlxiuF-_kRe04g_EXFalTp_';   // publishable: insert-only by row-level security
 const DRAFT = 'forkline-report-draft';
+const CREW_API = 'https://oaemgwclfilzlycxxccg.supabase.co/rest/v1/rpc/join_crew_list', CONSENT = 'c1';
 const $ = s => document.querySelector(s);
 $('#build').textContent = BUILD;
 
@@ -407,13 +421,36 @@ $('#send').addEventListener('click', async () => {
   try {
     const r = await fetch(API, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(row) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    clearDraft(); $('#done-cs').textContent = st.callsign; show('s-done');
+    clearDraft(); $('#done-cs').textContent = st.callsign; crewReset(); show('s-done');
   } catch (e) {
     $('#send-note').textContent = String(e.message).includes('401') || String(e.message).includes('403') ? "Your tester code has expired. Your answers are saved on this device: ask for a new code, then go Back to the start, enter it and send again." : "It didn't send. Your answers are saved on this device: check your connection and tap Send again."; $('#send-note').hidden = false;
   } finally { b.disabled = false; b.textContent = 'Send my report'; }
 });
 $('#back').addEventListener('click', () => { const prev = hist.pop(); if (!prev) return; if (current() === 's-questions') saveDraft(); show(prev, false); });
 $('#again').addEventListener('click', () => { $('#send-note').hidden = true; setup(); });
+
+/* ---------- optional crew list (18+ only; separate from the report) ---------- */
+function crewReset() {
+  $('#crew').hidden = st.age !== '18+';
+  ['#crew-name', '#crew-email'].forEach(s => { $(s).value = ''; $(s).disabled = false; });
+  $('#crew-ok').checked = false; $('#crew-ok').disabled = false; $('#crew-err').hidden = true; $('#crew-done').hidden = true; $('#crew-go').hidden = false;
+}
+$('#crew-go').addEventListener('click', async () => {
+  if (st.age !== '18+') return;
+  const email = $('#crew-email').value.trim(), name = $('#crew-name').value.trim(), err = $('#crew-err');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { err.textContent = 'Please enter a valid email address.'; err.hidden = false; return; }
+  if (!$('#crew-ok').checked) { err.textContent = 'Please tick the box to confirm you\'re 18 or older and want updates.'; err.hidden = false; return; }
+  err.hidden = true; const b = $('#crew-go'); b.disabled = true; b.textContent = 'Adding…';
+  try {
+    const r = await fetch(CREW_API, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_email: email, p_name: name, p_code: st.code, p_adult: true, p_consent_version: CONSENT }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    b.hidden = true; $('#crew-done').hidden = false;
+    ['#crew-name', '#crew-email', '#crew-ok'].forEach(s => $(s).disabled = true);
+  } catch (e) {
+    err.textContent = /40[13]/.test(String(e.message)) ? 'Your tester code has expired, so we couldn\'t add you. Ask for a new code and try again.' : 'That didn\'t go through. Check the email and your connection, then try again.'; err.hidden = false;
+  } finally { b.disabled = false; b.textContent = 'Add me'; }
+});
 </script>
 </body>
 </html>
