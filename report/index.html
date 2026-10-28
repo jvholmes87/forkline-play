@@ -93,8 +93,15 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
   <section class="step" id="s-welcome">
     <p>Thanks for testing Forkline! Your answers help us make the game fun and easy to learn. It takes about 5 minutes.</p>
     <p class="small muted">You won't be asked for your name, email or where you live. You'll make up a space callsign instead.</p>
-    <button class="btn" type="button" data-next="s-age">Start</button>
-    <p class="small">Haven't played yet? <a href="../" target="_blank" rel="noopener">Open the game</a>, play your quest, then come back here.</p>
+    <p class="small">If your feedback makes it into the game, your callsign can go in the in-game credits.</p>
+    <div class="card">
+      <label for="code"><b>Tester code</b></label>
+      <p class="hint">Play a mission first, then send the developer a screenshot of your game to get a code. Codes change every few days.</p>
+      <input type="text" id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="FL-XXXX-XXXX" maxlength="16" aria-describedby="code-err">
+      <p class="err" id="code-err" hidden></p>
+    </div>
+    <button class="btn" type="button" id="code-go">Start</button>
+    <p class="small">Haven't played yet? <a href="../" target="_blank" rel="noopener">Open the game</a>, play a mission, then come back with your code.</p>
   </section>
 
   <!-- 2. Age group -->
@@ -178,11 +185,12 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
   <details>
     <summary>Privacy, in plain words</summary>
     <ul class="small">
-      <li>We ask for an age group, a made-up callsign, which quest you played, your device type and your answers. Nothing else.</li>
+      <li>Reports need a tester code, which keeps out spam and bots. We ask for an age group, a made-up callsign, which quest you played, your device type and your answers. Nothing else.</li>
       <li>No names, emails, photos or locations. Please don't type them in answers.</li>
       <li>Under 14, a parent or guardian must say OK first.</li>
       <li>Reports are stored in Seoul (Supabase) and kept for up to 12 months, then deleted. They aren't sold or shared, and they're never used for ads.</li>
       <li>The server may log your network address for a short time to keep the service running. We don't store it with your report.</li>
+      <li>Callsigns only appear in the credits if you say yes and your feedback is used. We check callsigns before listing them.</li>
       <li>Forkline is made to be an E for Everyone game that teaches science, money and business through play.</li>
     </ul>
   </details>
@@ -197,7 +205,8 @@ const DRAFT = 'forkline-report-draft';
 const $ = s => document.querySelector(s);
 $('#build').textContent = BUILD;
 
-const st = { age: null, under14: false, grownUp: false, quest: null, callsign: '', device: null };
+const RPC = API.replace('/tester_reports', '/rpc/check_tester_code');
+const st = { code: '', age: null, under14: false, grownUp: false, quest: null, callsign: '', device: null };
 
 /* ---------- questions ---------- */
 // type: one | many | scale | faces | text. ages: which bands see it (default all). col: stored in a column too.
@@ -260,7 +269,8 @@ const COMMON = [
   { id: 'length', type: 'one', ages: ['18+'], q: 'Which mission length did you play?', opts: ['30 days', '45 days', '60 days', 'Daily mission'], cols: 2 },
   { id: 'economy', type: 'text', ages: ['18+'], q: 'Did prices, events and freight feel fair? Anything too strong or too weak?', opt: true },
   { id: 'pay', type: 'one', ages: ['18+'], q: 'Would you pay $3.99 a month for longer missions, two missions at once and an unlimited mission?', opts: ['yes', 'maybe', 'no'], cols: 3 },
-  { id: 'again', type: 'one', q: 'Would you play again tomorrow?', opts: ['yes!', 'maybe', 'no'], cols: 3 }
+  { id: 'again', type: 'one', q: 'Would you play again tomorrow?', opts: ['yes!', 'maybe', 'no'], cols: 3 },
+  { id: 'credit', type: 'one', q: 'If your feedback makes it into the game, can we list your callsign in the game credits?', opts: ['Yes, list my callsign', 'No, thanks'], opt: true }
 ];
 const GROWNUP = [
   { id: 'gu_minutes', type: 'text', q: 'For the grown-up: about how many minutes did it take?', opt: true, ph: 'minutes', num: true },
@@ -327,6 +337,22 @@ const current = () => [...document.querySelectorAll('.step')].find(s => !s.hidde
 function show(id, push = true) { const cur = current(); if (push && cur && cur !== id && cur !== 's-done') hist.push(cur); if (id === 's-done' || id === 's-welcome') hist.length = 0;
   $('#back').hidden = !hist.length; $('#back').nextElementSibling.hidden = !hist.length;
   document.querySelectorAll('.step').forEach(s => s.hidden = s.id !== id); window.scrollTo(0, 0); const h = $('#' + id + ' h2'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } }
+// Tester code: checked by the server before any questions; the database refuses reports without a valid code anyway
+const normCode = v => { const x = v.toUpperCase().replace(/[^A-Z0-9]/g, ''); const t = x.startsWith('FL') ? x.slice(2) : x; return t.length === 8 ? `FL-${t.slice(0, 4)}-${t.slice(4)}` : v.trim().toUpperCase(); };
+$('#code-go').addEventListener('click', async () => {
+  const c = normCode($('#code').value), e = $('#code-err'), b = $('#code-go');
+  if (!/^FL-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(c)) { e.textContent = 'Please type the code exactly as it was sent to you, like FL-AB12-CD34.'; e.hidden = false; return; }
+  b.disabled = true; b.textContent = 'Checking…';
+  try {
+    const r = await fetch(RPC, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ code: c }) });
+    const ok = r.ok && (await r.json()) === true;
+    if (!ok) { e.textContent = "That code isn't working. It may have expired: ask for a new one."; e.hidden = false; return; }
+    e.hidden = true; st.code = c; $('#code').value = c; show('s-age');
+  } catch (err) { e.textContent = "Couldn't check the code. Check your connection and try again."; e.hidden = false; }
+  finally { b.disabled = false; b.textContent = 'Start'; }
+});
+$('#code').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('#code-go').click(); });
+try { const q = new URLSearchParams(location.search).get('code'); if (q) $('#code').value = q; } catch (e) {}
 document.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => show(b.dataset.next)));
 document.querySelectorAll('[data-age]').forEach(b => b.addEventListener('click', () => {
   st.age = b.dataset.age; st.under14 = st.age === '8-12'; st.grownUp = false;
@@ -373,14 +399,14 @@ $('#send').addEventListener('click', async () => {
     document.querySelector(`[data-q="${miss[0].id}"]`).scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   $('#q-err').hidden = true;
   const a = collect(), row = { form_version: FORM, age_band: st.age, under14: st.under14, grown_up_ok: st.grownUp, quest: st.quest, build: BUILD,
-    callsign: st.callsign, device: st.device, fun: a.fun ?? null, clear: a.clear ?? null, answers: a };
+    callsign: st.callsign, device: st.device, access_code: st.code, fun: a.fun ?? null, clear: a.clear ?? null, answers: a };
   const b = $('#send'); b.disabled = true; b.textContent = 'Sending…';
   try {
     const r = await fetch(API, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(row) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     clearDraft(); $('#done-cs').textContent = st.callsign; show('s-done');
   } catch (e) {
-    $('#send-note').textContent = "It didn't send. Your answers are saved on this device: check your connection and tap Send again."; $('#send-note').hidden = false;
+    $('#send-note').textContent = String(e.message).includes('401') || String(e.message).includes('403') ? "Your tester code has expired. Your answers are saved on this device: ask for a new code, then go Back to the start, enter it and send again." : "It didn't send. Your answers are saved on this device: check your connection and tap Send again."; $('#send-note').hidden = false;
   } finally { b.disabled = false; b.textContent = 'Send my report'; }
 });
 $('#back').addEventListener('click', () => { const prev = hist.pop(); if (!prev) return; if (current() === 's-questions') saveDraft(); show(prev, false); });

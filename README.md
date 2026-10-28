@@ -5,7 +5,7 @@ A hard-science space trading game. You are an uploaded mind running a self-repli
 **Play:** https://jvholmes87.github.io/forkline-play/
 
 - Works on phone and desktop browsers; progress saves in your browser.
-- This is a pre-release playtest build (version 25). Scores may reset between builds.
+- This is a pre-release playtest build (version 25.2). Scores may reset between builds.
 - Found a problem? Tell Jason directly, with a screenshot if you can.
 
 The page is excluded from search engines until launch.
@@ -14,4 +14,4 @@ The page is excluded from search engines until launch.
 
 ## Tester report
 
-After a playtest, send your report at https://jvholmes87.github.io/forkline-play/report/ . It asks for an age group (8–12 needs a grown-up's OK), a made-up callsign and your answers. No names or emails.
+After a playtest, DM the developer a screenshot of your game to get a tester code, then send your report at https://jvholmes87.github.io/forkline-play/report/ . Codes change every 3 days. The report asks for an age group (8–12 needs a grown-up's OK), a made-up callsign and your answers. No names or emails. If your feedback is used, your callsign can go in the in-game credits.
