@@ -11,3 +11,7 @@ A hard-science space trading game. You are an uploaded mind running a self-repli
 The page is excluded from search engines until launch.
 
 © 2026 Jason Von Holmes. All rights reserved. This repository hosts the playable build only; no license is granted to copy, modify or redistribute it.
+
+## Tester report
+
+After a playtest, send your report at https://jvholmes87.github.io/forkline-play/report/ . It asks for an age group (8–12 needs a grown-up's OK), a made-up callsign and your answers. No names or emails.
