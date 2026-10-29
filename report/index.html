@@ -191,7 +191,7 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
       <label class="opt"><input type="checkbox" id="crew-ok"> I'm 18 or older, and I'd like Forkline and Songtan Labs updates by email. I can unsubscribe at any time.</label>
       <p class="err" id="crew-err" hidden></p>
       <button class="btn" type="button" id="crew-go" style="margin-top:8px">Add me</button>
-      <p class="ok" id="crew-done" hidden>You're on the list. Thanks for being part of the crew.</p>
+      <p class="ok" id="crew-done" hidden>Almost done: check your inbox for an email from crew@playforkline.com and tap Confirm. Not there in a few minutes? Check spam.</p>
     </div>
     <a class="btn" href="../" style="display:grid;place-items:center;text-decoration:none">Back to the game</a>
     <button class="btn ghost" type="button" id="again">Send another report</button>
@@ -202,7 +202,7 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
     <ul class="small">
       <li>Reports need a tester code, which keeps out spam and bots. We ask for an age group, a made-up callsign, which quest you played, your device type and your answers. Nothing else.</li>
       <li>Reports never ask for names, emails, photos or locations. Please don't type them in answers.</li>
-      <li>Adults (18+) can choose to join the crew list after sending a report. We keep the email, and a first name if you give one, separately from your report, and use it only for Forkline and Songtan Labs updates. It isn't sold or shared. It's kept until you unsubscribe or ask to be removed: email <a href="mailto:crew@playforkline.com">crew@playforkline.com</a>. Under-18s never see this option.</li>
+      <li>Adults (18+) can choose to join the crew list after sending a report. We keep the email, and a first name if you give one, separately from your report, and use it only for Forkline and Songtan Labs updates. It isn't sold or shared. We email you once to confirm; if you don't confirm within 7 days, the address is deleted. Once confirmed, it's kept until you unsubscribe or ask to be removed: email <a href="mailto:crew@playforkline.com">crew@playforkline.com</a>. Under-18s never see this option.</li>
       <li>Under 14, a parent or guardian must say OK first.</li>
       <li>Reports are stored in Seoul (Supabase) and kept for up to 12 months, then deleted. They aren't sold or shared, and they're never used for ads.</li>
       <li>The server may log your network address for a short time to keep the service running. We don't store it with your report.</li>
@@ -218,7 +218,7 @@ const BUILD = (new URLSearchParams(location.search).get('b') || 'v25').replace(/
 const API = 'https://oaemgwclfilzlycxxccg.supabase.co/rest/v1/tester_reports';
 const KEY = 'sb_publishable_OwdSfAEhMlxiuF-_kRe04g_EXFalTp_';   // publishable: insert-only by row-level security
 const DRAFT = 'forkline-report-draft';
-const CREW_API = 'https://oaemgwclfilzlycxxccg.supabase.co/rest/v1/rpc/join_crew_list', CONSENT = 'c1';
+const CREW_API = 'https://oaemgwclfilzlycxxccg.supabase.co/functions/v1/crew/join', CONSENT = 'c2';
 const $ = s => document.querySelector(s);
 $('#build').textContent = BUILD;
 
@@ -442,8 +442,8 @@ $('#crew-go').addEventListener('click', async () => {
   if (!$('#crew-ok').checked) { err.textContent = 'Please tick the box to confirm you\'re 18 or older and want updates.'; err.hidden = false; return; }
   err.hidden = true; const b = $('#crew-go'); b.disabled = true; b.textContent = 'Adding…';
   try {
-    const r = await fetch(CREW_API, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ p_email: email, p_name: name, p_code: st.code, p_adult: true, p_consent_version: CONSENT }) });
+    const r = await fetch(CREW_API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name, code: st.code, adult: true, consent_version: CONSENT }) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     b.hidden = true; $('#crew-done').hidden = false;
     ['#crew-name', '#crew-email', '#crew-ok'].forEach(s => $(s).disabled = true);
