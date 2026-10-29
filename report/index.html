@@ -97,19 +97,14 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
     <p>Thanks for testing Forkline! Your answers help us make the game fun and easy to learn. It takes about 5 minutes.</p>
     <p class="small muted">The report doesn't ask for your name, email or where you live. You'll make up a space callsign instead.</p>
     <p class="small">If your feedback makes it into the game, your callsign can go in the in-game credits.</p>
-    <div class="card">
-      <label for="code"><b>Tester code</b></label>
-      <p class="hint">Play a mission first, then send the developer a screenshot of your game to get a code. Codes change every few days.</p>
-      <input type="text" id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="FL-XXXX-XXXX" maxlength="16" aria-describedby="code-err">
-      <p class="err" id="code-err" hidden></p>
-    </div>
     <button class="btn" type="button" id="code-go">Start</button>
-    <p class="small">Haven't played yet? <a href="../" target="_blank" rel="noopener">Open the game</a>, play a mission, then come back with your code.</p>
+    <p class="small">Haven't played yet? <a href="../" target="_blank" rel="noopener">Open the game</a>, play a mission, then come back here.</p>
   </section>
 
   <!-- 2. Age group -->
   <section class="step" id="s-age" hidden>
-    <h2>How old are you?</h2>
+    <h2>How old is the player?</h2>
+    <p class="small muted">Filing for your child? Pick their age. A grown-up says OK first for players under 14.</p>
     <div class="big">
       <button type="button" data-age="8-12"><b>8 to 12</b><span>Short questions with bubbles. A grown-up says OK first.</span></button>
       <button type="button" data-age="13-17"><b>13 to 17</b><span>A few more questions.</span></button>
@@ -172,6 +167,8 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
     <h2 id="q-title"></h2>
     <form id="qform" class="qlist" novalidate></form>
     <p class="err" id="q-err" hidden></p>
+    <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label>Leave this empty <input type="text" id="hp-website" tabindex="-1" autocomplete="off"></label></div>
+    <div id="ts-box"></div>
     <button class="btn" type="button" id="send">Send my report</button>
     <p class="small muted" id="send-note" hidden></p>
   </section>
@@ -189,6 +186,7 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
       <label for="crew-email"><b>Email</b></label>
       <input type="email" id="crew-email" maxlength="254" autocomplete="email" inputmode="email" style="margin:6px 0 10px">
       <label class="opt"><input type="checkbox" id="crew-ok"> I'm 18 or older, and I'd like Forkline and Songtan Labs updates by email. I can unsubscribe at any time.</label>
+      <label class="opt"><input type="checkbox" id="crew-beta"> Also invite me to the beta team when it starts (try big updates before everyone else).</label>
       <p class="err" id="crew-err" hidden></p>
       <button class="btn" type="button" id="crew-go" style="margin-top:8px">Add me</button>
       <p class="ok" id="crew-done" hidden>Almost done: check your inbox for an email from crew@playforkline.com and tap Confirm. Not there in a few minutes? Check spam.</p>
@@ -200,7 +198,9 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
   <details>
     <summary>Privacy, in plain words</summary>
     <ul class="small">
-      <li>Reports need a tester code, which keeps out spam and bots. We ask for an age group, a made-up callsign, which quest you played, your device type and your answers. Nothing else.</li>
+      <li>We ask for an age group, a made-up callsign, which quest you played, your device type and your answers. Nothing else.</li>
+      <li>To keep out spam and bots, the server limits how many reports one connection can send. It keeps your connection address only as a scrambled code that can't be turned back into the address and is deleted within 2 days. We also use Cloudflare Turnstile, a privacy-friendly bot check.</li>
+      <li>We count visits with Cloudflare Web Analytics, which uses no cookies and doesn't identify you.</li>
       <li>Reports never ask for names, emails, photos or locations. Please don't type them in answers.</li>
       <li>Adults (18+) can choose to join the crew list after sending a report. We keep the email, and a first name if you give one, separately from your report, and use it only for Forkline and Songtan Labs updates. It isn't sold or shared. We email you once to confirm; if you don't confirm within 7 days, the address is deleted. Once confirmed, it's kept until you unsubscribe or ask to be removed: email <a href="mailto:crew@playforkline.com">crew@playforkline.com</a>. Under-18s never see this option.</li>
       <li>Under 14, a parent or guardian must say OK first.</li>
@@ -214,7 +214,7 @@ details ul{padding-left:20px;margin:8px 0} details li{margin:4px 0}
 
 <script>
 'use strict';
-const BUILD = (new URLSearchParams(location.search).get('b') || 'v25').replace(/[^\w.]/g, '').slice(0, 12), FORM = 'r1';
+const BUILD = (new URLSearchParams(location.search).get('b') || 'v25').replace(/[^\w.]/g, '').slice(0, 12), FORM = 'r2';
 const API = 'https://oaemgwclfilzlycxxccg.supabase.co/rest/v1/tester_reports';
 const KEY = 'sb_publishable_OwdSfAEhMlxiuF-_kRe04g_EXFalTp_';   // publishable: insert-only by row-level security
 const DRAFT = 'forkline-report-draft';
@@ -222,8 +222,10 @@ const CREW_API = 'https://oaemgwclfilzlycxxccg.supabase.co/functions/v1/crew/joi
 const $ = s => document.querySelector(s);
 $('#build').textContent = BUILD;
 
-const RPC = API.replace('/tester_reports', '/rpc/check_tester_code');
-const st = { code: '', age: null, under14: false, grownUp: false, quest: null, callsign: '', device: null };
+const REPORT_API = 'https://oaemgwclfilzlycxxccg.supabase.co/functions/v1/report/submit';
+const TS_SITE = '0x4AAAAAAFqtdFQP-jSLcsR5';   // Cloudflare Turnstile site key (public). Empty = Turnstile off.
+let tsToken = '', tsReady = false;
+const st = { receipt: '', t0: 0, age: null, under14: false, grownUp: false, quest: null, callsign: '', device: null };
 
 /* ---------- questions ---------- */
 // type: one | many | scale | faces | text. ages: which bands see it (default all). col: stored in a column too.
@@ -285,7 +287,7 @@ const COMMON = [
   { id: 'difficulty', type: 'one', ages: ['13-17', '18+'], q: 'How hard was the game?', opts: ['too easy', 'about right', 'too hard'], cols: 3 },
   { id: 'length', type: 'one', ages: ['18+'], q: 'Which mission length did you play?', opts: ['30 days', '45 days', '60 days', 'Daily mission'], cols: 2 },
   { id: 'economy', type: 'text', ages: ['18+'], q: 'Did prices, events and freight feel fair? Anything too strong or too weak?', opt: true },
-  { id: 'pay', type: 'one', ages: ['18+'], q: 'Would you pay $3.99 a month for longer missions, two missions at once and an unlimited mission?', opts: ['yes', 'maybe', 'no'], cols: 3 },
+  { id: 'pay', type: 'one', ages: ['18+'], q: 'Would you pay a one-time price (about $5) to unlock longer missions, an unlimited mission and extra sandbox slots? The full mission stays free.', opts: ['yes', 'maybe', 'no'], cols: 3 },
   { id: 'again', type: 'one', q: 'Would you play again tomorrow?', opts: ['yes!', 'maybe', 'no'], cols: 3 },
   { id: 'credit', type: 'one', q: 'If your feedback makes it into the game, can we list your callsign in the game credits?', opts: ['Yes, list my callsign', 'No, thanks'], opt: true }
 ];
@@ -354,25 +356,11 @@ const current = () => [...document.querySelectorAll('.step')].find(s => !s.hidde
 function show(id, push = true) { const cur = current(); if (push && cur && cur !== id && cur !== 's-done') hist.push(cur); if (id === 's-done' || id === 's-welcome') hist.length = 0;
   $('#back').hidden = !hist.length; $('#back').nextElementSibling.hidden = !hist.length;
   document.querySelectorAll('.step').forEach(s => s.hidden = s.id !== id); window.scrollTo(0, 0); const h = $('#' + id + ' h2'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } }
-// Tester code: checked by the server before any questions; the database refuses reports without a valid code anyway
-const normCode = v => { const x = v.toUpperCase().replace(/[^A-Z0-9]/g, ''); const t = x.startsWith('FL') ? x.slice(2) : x; return t.length === 8 ? `FL-${t.slice(0, 4)}-${t.slice(4)}` : v.trim().toUpperCase(); };
-$('#code-go').addEventListener('click', async () => {
-  const c = normCode($('#code').value), e = $('#code-err'), b = $('#code-go');
-  if (!/^FL-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(c)) { e.textContent = 'Please type the code exactly as it was sent to you, like FL-AB12-CD34.'; e.hidden = false; return; }
-  b.disabled = true; b.textContent = 'Checking…';
-  try {
-    const r = await fetch(RPC, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ code: c }) });
-    const ok = r.ok && (await r.json()) === true;
-    if (!ok) { e.textContent = "That code isn't working. It may have expired: ask for a new one."; e.hidden = false; return; }
-    e.hidden = true; st.code = c; $('#code').value = c; show('s-age');
-  } catch (err) { e.textContent = "Couldn't check the code. Check your connection and try again."; e.hidden = false; }
-  finally { b.disabled = false; b.textContent = 'Start'; }
-});
-$('#code').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('#code-go').click(); });
-try { const q = new URLSearchParams(location.search).get('code'); if (q) $('#code').value = q; } catch (e) {}
+// No tester code since v25.6 (DEC-054): the server checks for bots instead.
+$('#code-go').addEventListener('click', () => show('s-age'));
 document.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => show(b.dataset.next)));
 document.querySelectorAll('[data-age]').forEach(b => b.addEventListener('click', () => {
-  st.age = b.dataset.age; st.under14 = st.age === '8-12'; st.grownUp = false;
+  st.age = b.dataset.age; st.under14 = st.age === '8-12'; st.grownUp = false; if (!st.t0) st.t0 = Date.now();
   if (st.age === '13-17') return show('s-teen');
   if (st.age === '8-12') return openGate();
   setup();
@@ -406,7 +394,7 @@ $('#setup-go').addEventListener('click', () => {
   if (err) { $('#setup-err').textContent = err; $('#setup-err').hidden = false; return; }
   $('#setup-err').hidden = true; st.callsign = cs.slice(0, 24); st.quest = q.value; st.device = d.value;
   try { localStorage.setItem('forkline-callsign', st.callsign); } catch (e) {}
-  renderQuestions(); show('s-questions');
+  renderQuestions(); show('s-questions'); loadTurnstile();
 });
 
 /* ---------- submit ---------- */
@@ -416,24 +404,34 @@ $('#send').addEventListener('click', async () => {
     document.querySelector(`[data-q="${miss[0].id}"]`).scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   $('#q-err').hidden = true;
   const a = collect(), row = { form_version: FORM, age_band: st.age, under14: st.under14, grown_up_ok: st.grownUp, quest: st.quest, build: BUILD,
-    callsign: st.callsign, device: st.device, access_code: st.code, fun: a.fun ?? null, clear: a.clear ?? null, answers: a };
+    callsign: st.callsign, device: st.device, fun: a.fun ?? null, clear: a.clear ?? null, answers: a };
   const b = $('#send'); b.disabled = true; b.textContent = 'Sending…';
   try {
-    const r = await fetch(API, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(row) });
+    const r = await fetch(REPORT_API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row, hp: $('#hp-website').value, t_ms: Date.now() - st.t0, ts: tsToken }) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    const out = await r.json().catch(() => ({})); st.receipt = out.receipt || '';
+    if (window.turnstile && tsReady) { try { turnstile.reset('#ts-box'); } catch (e) {} } tsToken = '';
     clearDraft(); $('#done-cs').textContent = st.callsign; crewReset(); show('s-done');
   } catch (e) {
-    $('#send-note').textContent = String(e.message).includes('401') || String(e.message).includes('403') ? "Your tester code has expired. Your answers are saved on this device: ask for a new code, then go Back to the start, enter it and send again." : "It didn't send. Your answers are saved on this device: check your connection and tap Send again."; $('#send-note').hidden = false;
+    $('#send-note').textContent = String(e.message).includes('429') ? "Too many reports from this connection right now. Your answers are saved on this device: try again in an hour." : String(e.message).includes('403') ? "The bot check didn't pass. Your answers are saved on this device: wait a moment and tap Send again." : "It didn't send. Your answers are saved on this device: check your connection and tap Send again."; $('#send-note').hidden = false;
   } finally { b.disabled = false; b.textContent = 'Send my report'; }
 });
 $('#back').addEventListener('click', () => { const prev = hist.pop(); if (!prev) return; if (current() === 's-questions') saveDraft(); show(prev, false); });
-$('#again').addEventListener('click', () => { $('#send-note').hidden = true; setup(); });
+$('#again').addEventListener('click', () => { $('#send-note').hidden = true; st.t0 = Date.now(); setup(); });
+
+/* ---------- Cloudflare Turnstile (only when a site key is set) ---------- */
+function loadTurnstile() {
+  if (!TS_SITE || tsReady) return;
+  window.onTsLoad = () => { try { turnstile.render('#ts-box', { sitekey: TS_SITE, size: 'flexible', callback: t => { tsToken = t; }, 'expired-callback': () => { tsToken = ''; } }); tsReady = true; } catch (e) {} };
+  const sc = document.createElement('script'); sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTsLoad&render=explicit'; sc.async = true; document.head.append(sc);
+}
 
 /* ---------- optional crew list (18+ only; separate from the report) ---------- */
 function crewReset() {
   $('#crew').hidden = st.age !== '18+';
   ['#crew-name', '#crew-email'].forEach(s => { $(s).value = ''; $(s).disabled = false; });
-  $('#crew-ok').checked = false; $('#crew-ok').disabled = false; $('#crew-err').hidden = true; $('#crew-done').hidden = true; $('#crew-go').hidden = false;
+  $('#crew-ok').checked = false; $('#crew-ok').disabled = false; $('#crew-beta').checked = false; $('#crew-beta').disabled = false; $('#crew-err').hidden = true; $('#crew-done').hidden = true; $('#crew-go').hidden = false;
 }
 $('#crew-go').addEventListener('click', async () => {
   if (st.age !== '18+') return;
@@ -443,14 +441,15 @@ $('#crew-go').addEventListener('click', async () => {
   err.hidden = true; const b = $('#crew-go'); b.disabled = true; b.textContent = 'Adding…';
   try {
     const r = await fetch(CREW_API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, name, code: st.code, adult: true, consent_version: CONSENT }) });
+      body: JSON.stringify({ email, name, receipt: st.receipt, adult: true, consent_version: CONSENT, beta: $('#crew-beta').checked }) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     b.hidden = true; $('#crew-done').hidden = false;
-    ['#crew-name', '#crew-email', '#crew-ok'].forEach(s => $(s).disabled = true);
+    ['#crew-name', '#crew-email', '#crew-ok', '#crew-beta'].forEach(s => $(s).disabled = true);
   } catch (e) {
-    err.textContent = /40[13]/.test(String(e.message)) ? 'Your tester code has expired, so we couldn\'t add you. Ask for a new code and try again.' : 'That didn\'t go through. Check the email and your connection, then try again.'; err.hidden = false;
+    err.textContent = /40[13]/.test(String(e.message)) ? 'This sign-up link has expired. Send another report to join, or email crew@playforkline.com.' : 'That didn\'t go through. Check the email and your connection, then try again.'; err.hidden = false;
   } finally { b.disabled = false; b.textContent = 'Add me'; }
 });
 </script>
+<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "10199e0b3fbc4aa0a67986ba89904c25"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>
