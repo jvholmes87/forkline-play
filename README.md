@@ -1,17 +1,21 @@
-# Forkline: playtest build
+# Forkline: public beta/playtest
 
-A hard-science space trading game. You are an uploaded mind running a self-replicating freight probe: buy low and sell high across the Solar System and nearby stars, where every tonne costs propellant, star prices arrive light-years late, and three currency blocs move against each other.
+A science-fiction space trading game for phone and desktop browsers. Buy where goods are made, sell where they are wanted, and manage debt while prices and deadlines change. Travel costs time rather than fuel; trade settles in dollars.
 
-**Play:** https://jvholmes87.github.io/forkline-play/
+**Play:** https://playforkline.com/play/ · **Website:** https://playforkline.com/
 
-- Works on phone and desktop browsers; progress saves in your browser.
-- This is a pre-release playtest build (version 25.2). Scores may reset between builds.
-- Found a problem? Tell Jason directly, with a screenshot if you can.
+## Repository role and status
 
-The page is excluded from search engines until launch.
+This repository distributes the public website and playable build. Development source, build scripts and tests are maintained separately in a private repository. As checked on 14 November 2026, the live build identifies as **v25.12**. Preview builds are reviewed separately at https://preview.playforkline.com/ and are not the released build.
 
-© 2026 Jason Von Holmes. All rights reserved. This repository hosts the playable build only; no license is granted to copy, modify or redistribute it.
+Progress saves in your browser. This remains a beta/playtest; scores may reset between builds. The production site is indexable; preview pages are excluded from indexing. Do not describe the entire site as excluded from search.
 
-## Tester report
+## Feedback
 
-After a playtest, DM the developer a screenshot of your game to get a tester code, then send your report at https://jvholmes87.github.io/forkline-play/report/ . Codes change every 3 days. The report asks for an age group (8–12 needs a grown-up's OK), a made-up callsign and your answers. No names or emails. If your feedback is used, your callsign can go in the in-game credits.
+Use the [tester report page](https://playforkline.com/report/) and follow its current instructions. Report observed problems with the build version and a screenshot when useful. The developer reviews reports and proposed credits.
+
+## Publication and rights
+
+Production changes arrive by pull request and require Jason's merge. Preserve the release workflow and keep generated game/site files in sync with their development sources.
+
+© 2026 Jason Von Holmes. All rights reserved. No license is granted to copy, modify or redistribute this code or its content.
