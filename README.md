@@ -1,17 +1,29 @@
-# Forkline: playtest build
+# Forkline: public beta
 
-A hard-science space trading game. You are an uploaded mind running a self-replicating freight probe: buy low and sell high across the Solar System and nearby stars, where every tonne costs propellant, star prices arrive light-years late, and three currency blocs move against each other.
+A science-fiction space trading game for phone and desktop browsers. Buy where goods are made, sell where they are wanted, and clear your debt before the interest grows. Travel costs days, not fuel; every trade settles in dollars; price reports from the stars arrive days late because of light-lag.
 
-**Play:** https://jvholmes87.github.io/forkline-play/
+**Play:** https://playforkline.com/play/ · **Website:** https://playforkline.com/
 
-- Works on phone and desktop browsers; progress saves in your browser.
-- This is a pre-release playtest build (version 25.2). Scores may reset between builds.
-- Found a problem? Tell Jason directly, with a screenshot if you can.
+## What this repository is
 
-The page is excluded from search engines until launch.
+This repository is the published site: the public website and the playable build, served by GitHub Pages from the `main` branch at https://playforkline.com/. The development source (game source, build scripts, tests, design docs) lives in a separate private repository; the files here are its build output and are not edited by hand.
 
-© 2026 Jason Von Holmes. All rights reserved. This repository hosts the playable build only; no license is granted to copy, modify or redistribute it.
+Pages: `/` homepage · `/play/` the game · `/about/` how to play, for players, parents and teachers · `/fleet/` what is planned for the community · `/devlog/` · `/report/` tester report form · `/crew/` mailing-list confirmation.
 
-## Tester report
+Live build as of 16 November 2026: **v25.13** (the build tag is in the game's menu link "Send a tester report"). Preview builds for review are published separately at https://preview.playforkline.com/ and are not the released build.
 
-After a playtest, DM the developer a screenshot of your game to get a tester code, then send your report at https://jvholmes87.github.io/forkline-play/report/ . Codes change every 3 days. The report asks for an age group (8–12 needs a grown-up's OK), a made-up callsign and your answers. No names or emails. If your feedback is used, your callsign can go in the in-game credits.
+## Status
+
+Public beta. Progress saves in your browser; local records may restart when a build changes the economy, and the game says so when it happens. The production site is indexable (`robots.txt` allows all, with a sitemap); the tester report and crew pages carry `noindex`, and the preview site is excluded from indexing.
+
+## Feedback
+
+Play a mission, then use the [tester report page](https://playforkline.com/report/) and follow the instructions there (no code, name or email is needed; you pick a callsign). Include the build version and a screenshot when they help. Feedback that changes the game can earn a credit in the in-game Codex, by callsign, if you opt in.
+
+## Publication
+
+Changes arrive here by pull request from the development repository's build step and go live only when Jason merges them. Preview first, then production.
+
+## Rights
+
+© 2026 Jason Von Holmes. All rights reserved. This repository distributes the playable build and site for play in the browser; no license is granted to copy, modify or redistribute the code or its content.
