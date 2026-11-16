@@ -10,7 +10,7 @@ This repository is the published site: the public website and the playable build
 
 Pages: `/` homepage · `/play/` the game · `/about/` how to play, for players, parents and teachers · `/fleet/` what is planned for the community · `/devlog/` · `/report/` tester report form · `/crew/` mailing-list confirmation.
 
-Live build as of 16 November 2026: **v25.13** (the build tag is in the game's menu under "Report a problem"). Preview builds for review are published separately at https://preview.playforkline.com/ and are not the released build.
+Live build as of 16 November 2026: **v25.13** (the build tag is in the game's menu link "Send a tester report"). Preview builds for review are published separately at https://preview.playforkline.com/ and are not the released build.
 
 ## Status
 
