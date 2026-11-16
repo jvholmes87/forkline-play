@@ -1,21 +1,29 @@
-# Forkline: public beta/playtest
+# Forkline: public beta
 
-A science-fiction space trading game for phone and desktop browsers. Buy where goods are made, sell where they are wanted, and manage debt while prices and deadlines change. Travel costs time rather than fuel; trade settles in dollars.
+A science-fiction space trading game for phone and desktop browsers. Buy where goods are made, sell where they are wanted, and clear your debt before the interest grows. Travel costs days, not fuel; every trade settles in dollars; price reports from the stars arrive days late because of light-lag.
 
 **Play:** https://playforkline.com/play/ · **Website:** https://playforkline.com/
 
-## Repository role and status
+## What this repository is
 
-This repository distributes the public website and playable build. Development source, build scripts and tests are maintained separately in a private repository. As checked on 14 November 2026, the live build identifies as **v25.12**. Preview builds are reviewed separately at https://preview.playforkline.com/ and are not the released build.
+This repository is the published site: the public website and the playable build, served by GitHub Pages from the `main` branch at https://playforkline.com/. The development source (game source, build scripts, tests, design docs) lives in a separate private repository; the files here are its build output and are not edited by hand.
 
-Progress saves in your browser. This remains a beta/playtest; scores may reset between builds. The production site is indexable; preview pages are excluded from indexing. Do not describe the entire site as excluded from search.
+Pages: `/` homepage · `/play/` the game · `/about/` how to play, for players, parents and teachers · `/fleet/` what is planned for the community · `/devlog/` · `/report/` tester report form · `/crew/` mailing-list confirmation.
+
+Live build as of 16 November 2026: **v25.13** (the build tag is in the game's menu under "Report a problem"). Preview builds for review are published separately at https://preview.playforkline.com/ and are not the released build.
+
+## Status
+
+Public beta. Progress saves in your browser; local records may restart when a build changes the economy, and the game says so when it happens. The production site is indexable (`robots.txt` allows all, with a sitemap); the tester report and crew pages carry `noindex`, and the preview site is excluded from indexing.
 
 ## Feedback
 
-Use the [tester report page](https://playforkline.com/report/) and follow its current instructions. Report observed problems with the build version and a screenshot when useful. The developer reviews reports and proposed credits.
+Play a mission, then use the [tester report page](https://playforkline.com/report/) and follow the instructions there (no code, name or email is needed; you pick a callsign). Include the build version and a screenshot when they help. Feedback that changes the game can earn a credit in the in-game Codex, by callsign, if you opt in.
 
-## Publication and rights
+## Publication
 
-Production changes arrive by pull request and require Jason's merge. Preserve the release workflow and keep generated game/site files in sync with their development sources.
+Changes arrive here by pull request from the development repository's build step and go live only when Jason merges them. Preview first, then production.
 
-© 2026 Jason Von Holmes. All rights reserved. No license is granted to copy, modify or redistribute this code or its content.
+## Rights
+
+© 2026 Jason Von Holmes. All rights reserved. This repository distributes the playable build and site for play in the browser; no license is granted to copy, modify or redistribute the code or its content.
