@@ -1,0 +1,22 @@
+# Proposed reviewed non-secret historical matches. Owner review required.
+# No key or password values are stored here. New/changed matches still fail.
+# public_cloudflare_web_analytics_beacon_identifier
+5ba7dd1b2901c1a1c8759766e2d51d9972bdc484:fleet/index.html:generic-api-key:165
+# public_cloudflare_web_analytics_beacon_identifier
+c81447d2e305ee9de34dc2e8a32dd7d16c430fef:fleet/index.html:generic-api-key:165
+# public_cloudflare_web_analytics_beacon_identifier
+b1c496d77c48a73197a2c38aba78179757951732:devlog/index.html:generic-api-key:273
+# public_cloudflare_web_analytics_beacon_identifier
+65059a574c539b7ff47e910125cad10be742b0dd:about/index.html:generic-api-key:231
+# public_cloudflare_web_analytics_beacon_identifier
+d1b7c4696e38508b16fc103ef8cf3e311462ea93:about/index.html:generic-api-key:231
+# supabase_public_publishable_key_verify_RLS
+06c1aabc92f3af8b6ca1284d222255e67132fccd:index.html:generic-api-key:313
+# public_cloudflare_web_analytics_beacon_identifier
+fd1872cfd49d514a75b066ecc19b283b1525ea13:index.html:generic-api-key:300
+# public_cloudflare_web_analytics_beacon_identifier
+fd1872cfd49d514a75b066ecc19b283b1525ea13:report/index.html:generic-api-key:453
+# supabase_public_publishable_key_verify_RLS
+0b58a10757795adc769ca0a2ea2ba62e729c324b:report/index.html:generic-api-key:183
+# public_cloudflare_web_analytics_beacon_identifier
+fd1872cfd49d514a75b066ecc19b283b1525ea13:play/index.html:generic-api-key:1464
